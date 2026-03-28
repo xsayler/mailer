@@ -17,7 +17,7 @@ impl SmtpClient {
         subject: &str,
         body: &str,
         attachments: &[(String, Vec<u8>)],
-    ) -> Result<(), MailError> {
+    ) -> Result<Vec<u8>, MailError> {
         let from = format!("{} <{}>", config.display_name, config.email)
             .parse()
             .map_err(|e| MailError::Smtp(format!("Invalid from address: {e}")))?;
@@ -104,13 +104,15 @@ impl SmtpClient {
             .credentials(creds)
             .build();
 
+        let raw_message = message.formatted();
+
         mailer
             .send(message)
             .await
             .map_err(|e| MailError::Smtp(format!("Send failed: {e}")))?;
 
         info!("Email sent successfully to {to}");
-        Ok(())
+        Ok(raw_message)
     }
 }
 

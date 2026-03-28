@@ -3,12 +3,24 @@ use crate::i18n::t;
 use crate::runtime;
 use adw::prelude::*;
 
+/// Show account dialog. If `existing` is Some((index, config)), edit that account.
+/// Otherwise create a new one.
 pub fn show_account_dialog(
     parent: &impl IsA<gtk::Window>,
+    existing: Option<(usize, AccountConfig)>,
     on_save: impl Fn(AccountConfig) + 'static,
 ) {
+    let editing = existing.is_some();
+    let (edit_index, prefill) = existing.unwrap_or((0, AccountConfig::default()));
+
+    let title = if editing {
+        t("account.setup_title")
+    } else {
+        t("account.add_title")
+    };
+
     let window = adw::Window::builder()
-        .title(t("account.setup_title"))
+        .title(title)
         .default_width(500)
         .default_height(600)
         .transient_for(parent)
@@ -31,21 +43,18 @@ pub fn show_account_dialog(
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    // Welcome
-    let title = gtk::Label::new(Some(t("account.add_title")));
-    title.add_css_class("title-1");
-    content.append(&title);
-
     // Personal info
     let personal_group = adw::PreferencesGroup::new();
     personal_group.set_title(t("account.personal"));
 
     let name_row = adw::EntryRow::new();
     name_row.set_title(t("account.display_name"));
+    name_row.set_text(&prefill.display_name);
     personal_group.add(&name_row);
 
     let email_row = adw::EntryRow::new();
     email_row.set_title(t("account.email"));
+    email_row.set_text(&prefill.email);
     personal_group.add(&email_row);
 
     content.append(&personal_group);
@@ -56,11 +65,12 @@ pub fn show_account_dialog(
 
     let imap_host_row = adw::EntryRow::new();
     imap_host_row.set_title(t("account.imap_server"));
+    imap_host_row.set_text(&prefill.imap_host);
     imap_group.add(&imap_host_row);
 
     let imap_port_row = adw::EntryRow::new();
     imap_port_row.set_title(t("account.imap_port"));
-    imap_port_row.set_text("993");
+    imap_port_row.set_text(&prefill.imap_port.to_string());
     imap_group.add(&imap_port_row);
 
     content.append(&imap_group);
@@ -71,11 +81,12 @@ pub fn show_account_dialog(
 
     let smtp_host_row = adw::EntryRow::new();
     smtp_host_row.set_title(t("account.smtp_server"));
+    smtp_host_row.set_text(&prefill.smtp_host);
     smtp_group.add(&smtp_host_row);
 
     let smtp_port_row = adw::EntryRow::new();
     smtp_port_row.set_title(t("account.smtp_port"));
-    smtp_port_row.set_text("587");
+    smtp_port_row.set_text(&prefill.smtp_port.to_string());
     smtp_group.add(&smtp_port_row);
 
     content.append(&smtp_group);
@@ -86,10 +97,12 @@ pub fn show_account_dialog(
 
     let username_row = adw::EntryRow::new();
     username_row.set_title(t("account.username"));
+    username_row.set_text(&prefill.username);
     auth_group.add(&username_row);
 
     let password_row = adw::PasswordEntryRow::new();
     password_row.set_title(t("account.password"));
+    // Don't prefill password — it's loaded from keyring at runtime
     auth_group.add(&password_row);
 
     content.append(&auth_group);
@@ -105,6 +118,7 @@ pub fn show_account_dialog(
     sig_view.set_right_margin(8);
     sig_view.set_top_margin(8);
     sig_view.set_bottom_margin(8);
+    sig_view.buffer().set_text(&prefill.signature);
     let sig_frame = gtk::Frame::new(None);
     sig_frame.set_child(Some(&sig_view));
     sig_frame.set_height_request(100);
@@ -137,7 +151,7 @@ pub fn show_account_dialog(
         let username = username_row.text().to_string();
         let password = password_row.text().to_string();
 
-        if email.is_empty() || imap_host.is_empty() || username.is_empty() || password.is_empty() {
+        if email.is_empty() || imap_host.is_empty() || username.is_empty() {
             let toast = adw::Toast::new(t("account.fill_required"));
             toast_ov.add_toast(toast);
             return;
@@ -166,24 +180,32 @@ pub fn show_account_dialog(
             signature,
         };
 
-        // Save to config file (password excluded via skip_serializing)
+        // Save to config file
         let mut app_config = AppConfig::load();
-        app_config.accounts.push(config.clone());
+        if editing {
+            if let Some(existing) = app_config.accounts.get_mut(edit_index) {
+                *existing = config.clone();
+            }
+        } else {
+            app_config.accounts.push(config.clone());
+        }
         app_config.save();
 
-        // Store password in keyring
-        let email_for_keyring = email.clone();
-        let password_for_keyring = password.clone();
-        runtime::spawn_on_main(
-            async move {
-                config::store_password(&email_for_keyring, &password_for_keyring).await
-            },
-            |result| {
-                if let Err(e) = result {
-                    log::warn!("Failed to store password in keyring: {e}");
-                }
-            },
-        );
+        // Store password in keyring (only if non-empty — editing may leave it blank)
+        if !password.is_empty() {
+            let email_for_keyring = email.clone();
+            let password_for_keyring = password.clone();
+            runtime::spawn_on_main(
+                async move {
+                    config::store_password(&email_for_keyring, &password_for_keyring).await
+                },
+                |result| {
+                    if let Err(e) = result {
+                        log::warn!("Failed to store password in keyring: {e}");
+                    }
+                },
+            );
+        }
 
         on_save(config);
         win.close();

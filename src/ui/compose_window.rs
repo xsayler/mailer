@@ -1,13 +1,20 @@
 use crate::config::AccountConfig;
 use crate::i18n::{t, tf};
+use crate::mail::imap_client::ImapClient;
 use crate::mail::smtp_client::SmtpClient;
 use crate::runtime;
 use adw::prelude::*;
 use gtk::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
-pub fn show_compose_window(parent: &impl IsA<gtk::Window>, config: AccountConfig, draft: Option<crate::mail::drafts::Draft>) {
+pub fn show_compose_window(
+    parent: &impl IsA<gtk::Window>,
+    config: AccountConfig,
+    draft: Option<crate::mail::drafts::Draft>,
+    imap_client: Option<Arc<ImapClient>>,
+) {
     let window = adw::Window::builder()
         .title(t("compose.title"))
         .default_width(640)
@@ -312,10 +319,36 @@ pub fn show_compose_window(parent: &impl IsA<gtk::Window>, config: AccountConfig
         let toast_ov = toast_ov.clone();
         let attachments = atts.borrow().clone();
         let sent = sent_flag.clone();
+        let imap = imap_client.clone();
 
         runtime::spawn_on_main(
             async move {
-                SmtpClient::send(&config, &to, &cc, &bcc, &subject, &body, &attachments).await
+                let mut config = config;
+                if config.password.is_empty() {
+                    match crate::config::load_password(&config.email).await {
+                        Ok(pw) => config.password = pw,
+                        Err(e) => return Err(crate::mail::error::MailError::Auth(e)),
+                    }
+                }
+                let raw = SmtpClient::send(&config, &to, &cc, &bcc, &subject, &body, &attachments).await?;
+                log::info!("SMTP send OK, raw message size: {} bytes", raw.len());
+                // Save to Sent folder
+                if let Some(ref client) = imap {
+                    match client.find_sent_folder().await {
+                        Ok(Some(sent_folder)) => {
+                            log::info!("Appending to Sent folder: {:?}", sent_folder);
+                            match client.append_to_folder(&sent_folder, &raw).await {
+                                Ok(()) => log::info!("Append to Sent OK"),
+                                Err(e) => log::error!("Append to Sent failed: {e}"),
+                            }
+                        }
+                        Ok(None) => log::warn!("No Sent folder found, skipping append"),
+                        Err(e) => log::error!("find_sent_folder failed: {e}"),
+                    }
+                } else {
+                    log::warn!("No IMAP client, skipping Sent folder append");
+                }
+                Ok(())
             },
             move |result| match result {
                 Ok(()) => {
@@ -340,6 +373,7 @@ pub fn show_reply_window(
     reply_to: &str,
     subject: &str,
     original_body: &str,
+    imap_client: Option<Arc<ImapClient>>,
 ) {
     let window = adw::Window::builder()
         .title(t("compose.reply_title"))
@@ -430,8 +464,24 @@ pub fn show_reply_window(
         let btn = btn.clone();
         let toast_ov = toast_ov.clone();
 
+        let imap = imap_client.clone();
         runtime::spawn_on_main(
-            async move { SmtpClient::send(&config, &to, "", "", &subject, &body, &[]).await },
+            async move {
+                let mut config = config;
+                if config.password.is_empty() {
+                    match crate::config::load_password(&config.email).await {
+                        Ok(pw) => config.password = pw,
+                        Err(e) => return Err(crate::mail::error::MailError::Auth(e)),
+                    }
+                }
+                let raw = SmtpClient::send(&config, &to, "", "", &subject, &body, &[]).await?;
+                if let Some(ref client) = imap {
+                    if let Ok(Some(sent_folder)) = client.find_sent_folder().await {
+                        client.append_to_folder(&sent_folder, &raw).await.ok();
+                    }
+                }
+                Ok(())
+            },
             move |result| match result {
                 Ok(()) => win.close(),
                 Err(e) => {

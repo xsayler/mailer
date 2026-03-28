@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AccountConfig {
     pub display_name: String,
     pub email: String,

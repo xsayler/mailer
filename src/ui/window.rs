@@ -2,7 +2,7 @@ use crate::config::{AccountConfig, AppConfig};
 use crate::i18n::{t, tf};
 use crate::mail::disk_cache;
 use crate::mail::error::MailError;
-use crate::mail::imap_client::ImapClient;
+use crate::mail::imap_client::{self, ImapClient};
 use crate::runtime;
 use crate::state::AppState;
 use crate::ui::account_dialog;
@@ -63,6 +63,10 @@ impl MailerWindow {
         account_btn.set_tooltip_text(Some(t("tooltip.account_settings")));
         header.pack_end(&account_btn);
 
+        let add_account_btn = gtk::Button::from_icon_name("list-add-symbolic");
+        add_account_btn.set_tooltip_text(Some(t("account.add_title")));
+        header.pack_end(&add_account_btn);
+
         // Account switcher
         let account_model = gtk::StringList::new(&[]);
         let account_dropdown = gtk::DropDown::new(Some(account_model.clone()), gtk::Expression::NONE);
@@ -73,9 +77,7 @@ impl MailerWindow {
                 account_model.append(&acc.email);
             }
         }
-        if account_model.n_items() > 1 {
-            header.pack_end(&account_dropdown);
-        }
+        header.pack_end(&account_dropdown);
 
         main_box.append(&header);
 
@@ -162,7 +164,8 @@ impl MailerWindow {
                     return;
                 };
 
-                status2.set_text(&tf("status.loading_folder", &[&folder_path]));
+                let folder_display = imap_client::decode_mutf7(&folder_path);
+                status2.set_text(&tf("status.loading_folder", &[&folder_display]));
                 spinner2.set_spinning(true);
 
                 let msg_list = msg_list.clone();
@@ -475,12 +478,13 @@ impl MailerWindow {
                 {
                     let win = win_ctx.clone();
                     let msg2 = msg.clone();
+                    let imap_reply = imap_ctx.clone();
                     reply_action.connect_activate(move |_, _| {
                         let config = AppConfig::load();
                         let Some(account) = config.first_account() else { return };
                         let reply_to = msg2.from.first().map(|a| a.email.clone()).unwrap_or_default();
                         let body = msg2.body_text.as_deref().unwrap_or("");
-                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body);
+                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body, imap_reply.borrow().clone());
                     });
                 }
                 action_group.add_action(&reply_action);
@@ -541,11 +545,12 @@ impl MailerWindow {
         {
             let win2 = window.clone();
             let dd = account_dropdown.clone();
+            let imap_compose = imap_client.clone();
             compose_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
                 let idx = dd.selected() as usize;
                 if let Some(account) = config.accounts.get(idx) {
-                    compose_window::show_compose_window(&win2, account.clone(), None);
+                    compose_window::show_compose_window(&win2, account.clone(), None, imap_compose.borrow().clone());
                 }
             });
         }
@@ -555,6 +560,7 @@ impl MailerWindow {
             let win3 = window.clone();
             let msg_list3 = message_list.clone();
             let dd2 = account_dropdown.clone();
+            let imap_reply = imap_client.clone();
             reply_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
                 let idx = dd2.selected() as usize;
@@ -577,6 +583,7 @@ impl MailerWindow {
                             &reply_to,
                             &msg.subject,
                             body,
+                            imap_reply.borrow().clone(),
                         );
                     }
                 }
@@ -690,8 +697,10 @@ impl MailerWindow {
             let spinner3 = spinner.clone();
             let toast3 = toast_overlay.clone();
             let msg_list_for_folders = message_list.clone();
+            let dd_for_edit = account_dropdown.clone();
 
             account_btn.connect_clicked(move |_| {
+                let account_dropdown = dd_for_edit.clone();
                 let folder_list = folder_list2.clone();
                 let imap = imap3.clone();
                 let status = status3.clone();
@@ -699,7 +708,59 @@ impl MailerWindow {
                 let toast = toast3.clone();
                 let ml = msg_list_for_folders.clone();
 
-                account_dialog::show_account_dialog(&win4, move |config| {
+                // Get current account for editing
+                let app_config = AppConfig::load();
+                let dd_selected = account_dropdown.selected() as usize;
+                let existing = app_config
+                    .accounts
+                    .get(dd_selected)
+                    .map(|a| (dd_selected, a.clone()));
+
+                let is_editing = existing.is_some();
+                account_dialog::show_account_dialog(&win4, existing, move |config| {
+                    // When editing without changing password, don't reconnect
+                    if is_editing && config.password.is_empty() {
+                        return;
+                    }
+                    connect_account(
+                        config,
+                        imap.clone(),
+                        folder_list.clone(),
+                        status.clone(),
+                        spinner.clone(),
+                        toast.clone(),
+                        ml.clone(),
+                    );
+                });
+            });
+        }
+
+        // Add account button
+        {
+            let win5 = window.clone();
+            let folder_list5 = folder_list.clone();
+            let imap5 = imap_client.clone();
+            let status5 = status_label.clone();
+            let spinner5 = spinner.clone();
+            let toast5 = toast_overlay.clone();
+            let ml5 = message_list.clone();
+            let am5 = account_model.clone();
+            let dd5 = account_dropdown.clone();
+
+            add_account_btn.connect_clicked(move |_| {
+                let folder_list = folder_list5.clone();
+                let imap = imap5.clone();
+                let status = status5.clone();
+                let spinner = spinner5.clone();
+                let toast = toast5.clone();
+                let ml = ml5.clone();
+                let am = am5.clone();
+                let dd = dd5.clone();
+
+                account_dialog::show_account_dialog(&win5, None, move |config| {
+                    am.append(&config.email);
+                    let new_idx = am.n_items() - 1;
+                    dd.set_selected(new_idx);
                     connect_account(
                         config,
                         imap.clone(),
@@ -1035,6 +1096,7 @@ impl MailerWindow {
             let win_d = window.clone();
             let dd_d = account_dropdown.clone();
             let popover_d = popover.clone();
+            let imap_drafts = imap_client.clone();
             popover.connect_show(move |pop| {
                 // Rebuild drafts list each time
                 let drafts_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -1063,11 +1125,12 @@ impl MailerWindow {
                         let dd = dd_d.clone();
                         let pop2 = popover_d.clone();
                         let d = draft.clone();
+                        let imap_d = imap_drafts.clone();
                         btn.connect_clicked(move |_| {
                             let config = AppConfig::load();
                             let idx = dd.selected() as usize;
                             if let Some(account) = config.accounts.get(idx) {
-                                compose_window::show_compose_window(&win, account.clone(), Some(d.clone()));
+                                compose_window::show_compose_window(&win, account.clone(), Some(d.clone()), imap_d.borrow().clone());
                             }
                             pop2.popdown();
                         });

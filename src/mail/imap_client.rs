@@ -596,6 +596,75 @@ impl ImapClient {
         }
     }
 
+    /// Find the Sent folder by checking LIST attributes and common names.
+    pub async fn find_sent_folder(&self) -> Result<Option<String>, MailError> {
+        self.ensure_connected().await?;
+        let mut session = self.session.lock().await;
+        let sess = session.as_mut().ok_or(MailError::Imap("Not connected".to_string()))?;
+
+        let mailboxes_stream = sess
+            .list(Some(""), Some("*"))
+            .await
+            .map_err(|e| MailError::Imap(format!("LIST failed: {e}")))?;
+
+        let mailboxes: Vec<_> = mailboxes_stream
+            .filter_map(|r| async { r.ok() })
+            .collect()
+            .await;
+
+        // Log all folders for debugging
+        for mb in &mailboxes {
+            let attrs: Vec<_> = mb.attributes().into_iter().collect();
+            let decoded = decode_mutf7(mb.name());
+            info!("IMAP folder: raw={:?} decoded={:?} attrs={:?}", mb.name(), decoded, attrs);
+        }
+
+        // Check for \Sent attribute first (SPECIAL-USE / XLIST)
+        for mb in &mailboxes {
+            let attrs: Vec<_> = mb.attributes().into_iter().collect();
+            for attr in &attrs {
+                let s = format!("{:?}", attr);
+                if s.contains("Sent") {
+                    info!("Found Sent folder by attribute: {:?}", mb.name());
+                    return Ok(Some(mb.name().to_string()));
+                }
+            }
+        }
+
+        // Fallback: match common Sent folder names against decoded MUTF7
+        let sent_patterns = [
+            "sent", "sent mail", "sent messages",
+            "отправленные", "отправленная почта",
+        ];
+        for mb in &mailboxes {
+            let decoded = decode_mutf7(mb.name()).to_lowercase();
+            let last_component = decoded
+                .rsplit(|c| c == '/' || c == '.')
+                .next()
+                .unwrap_or(&decoded);
+            for pattern in &sent_patterns {
+                if last_component == *pattern || decoded.contains(pattern) {
+                    info!("Found Sent folder by name: raw={:?} decoded={:?}", mb.name(), decoded);
+                    return Ok(Some(mb.name().to_string()));
+                }
+            }
+        }
+
+        info!("No Sent folder found");
+        Ok(None)
+    }
+
+    /// Append a raw message to a folder (typically Sent).
+    pub async fn append_to_folder(&self, folder: &str, raw_message: &[u8]) -> Result<(), MailError> {
+        self.ensure_connected().await?;
+        let mut session = self.session.lock().await;
+        let sess = session.as_mut().ok_or(MailError::Imap("Not connected".to_string()))?;
+        sess.append(folder, Some("(\\Seen)"), None, raw_message)
+            .await
+            .map_err(|e| MailError::Imap(format!("APPEND failed: {e}")))?;
+        Ok(())
+    }
+
     pub async fn create_folder(&self, name: &str) -> Result<(), MailError> {
         self.ensure_connected().await?;
         let mut session = self.session.lock().await;
@@ -723,7 +792,7 @@ impl ImapClient {
 }
 
 /// Decode IMAP modified UTF-7 mailbox names (RFC 3501 §5.1.3).
-fn decode_mutf7(input: &str) -> String {
+pub fn decode_mutf7(input: &str) -> String {
     let mut result = String::new();
     let mut chars = input.chars().peekable();
 
