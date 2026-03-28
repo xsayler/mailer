@@ -347,10 +347,12 @@ impl MailerWindow {
             });
         }
 
-        // Message click → show preview
+        // Message click → show preview + auto mark read after 1s
         {
             let msg_view2 = message_view.clone();
             let msg_list2 = message_list.clone();
+            let imap_auto = imap_client.clone();
+            let state_auto = state.clone();
 
             message_list.list_box.connect_row_selected(move |_, row| {
                 let Some(row) = row else { return };
@@ -358,6 +360,28 @@ impl MailerWindow {
 
                 if let Some(msg) = msg_list2.get_sorted_message(index) {
                     msg_view2.show_message(&msg);
+
+                    if !msg.is_read {
+                        let uid = msg.uid;
+                        let imap = imap_auto.clone();
+                        let state = state_auto.clone();
+                        let ml = msg_list2.clone();
+                        glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
+                            let Some(client) = imap.borrow().clone() else { return };
+                            let folder = state.borrow().selected_folder.clone().unwrap_or_default();
+                            let st = state.clone();
+                            let ml = ml.clone();
+                            runtime::spawn_on_main(
+                                async move { client.mark_read(&folder, uid, true).await },
+                                move |result| {
+                                    if result.is_ok() {
+                                        st.borrow_mut().update_read_status(uid, true);
+                                        ml.update_read_status(uid, true);
+                                    }
+                                },
+                            );
+                        });
+                    }
                 }
             });
         }
