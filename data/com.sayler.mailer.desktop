@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Mailer
+Name[ru]=Почта
+Comment=Email client
+Comment[ru]=Почтовый клиент
+Exec=mailer
+Icon=com.sayler.mailer
+Terminal=false
+Type=Application
+Categories=Network;Email;
+StartupWMClass=com.sayler.mailer
