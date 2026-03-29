@@ -17,7 +17,6 @@ pub struct MessageList {
     pub widget: gtk::Box,
     pub list_box: gtk::ListBox,
     pub search_entry: gtk::SearchEntry,
-    pub load_more_btn: gtk::Button,
     pub model: gio::ListStore,
     sort_field: Rc<Cell<SortField>>,
     sort_ascending: Rc<Cell<bool>>,
@@ -26,6 +25,9 @@ pub struct MessageList {
     filter_query: Rc<std::cell::RefCell<String>>,
     folders: Rc<std::cell::RefCell<Vec<MailFolder>>>,
     on_server_search: Rc<std::cell::RefCell<Option<Box<dyn Fn(String)>>>>,
+    on_load_more: Rc<std::cell::RefCell<Option<Box<dyn Fn()>>>>,
+    has_more: Rc<std::cell::Cell<bool>>,
+    loading_more: Rc<std::cell::Cell<bool>>,
 }
 
 impl MessageList {
@@ -90,21 +92,11 @@ impl MessageList {
         sort_bar.append(&unread_btn);
         sort_bar.append(&dir_btn);
 
-        // Load more button
-        let load_more_btn = gtk::Button::with_label(t("pagination.load_more"));
-        load_more_btn.add_css_class("flat");
-        load_more_btn.set_margin_start(8);
-        load_more_btn.set_margin_end(8);
-        load_more_btn.set_margin_top(4);
-        load_more_btn.set_margin_bottom(4);
-        load_more_btn.set_visible(false);
-
         // Main container
         let main_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         main_box.append(&search_entry);
         main_box.append(&sort_bar);
         main_box.append(&scrolled);
-        main_box.append(&load_more_btn);
 
         let sort_field = Rc::new(Cell::new(SortField::Date));
         let sort_ascending = Rc::new(Cell::new(false));
@@ -119,12 +111,15 @@ impl MessageList {
 
         let on_server_search: Rc<std::cell::RefCell<Option<Box<dyn Fn(String)>>>> =
             Rc::new(std::cell::RefCell::new(None));
+        let on_load_more: Rc<std::cell::RefCell<Option<Box<dyn Fn()>>>> =
+            Rc::new(std::cell::RefCell::new(None));
+        let has_more = Rc::new(std::cell::Cell::new(false));
+        let loading_more = Rc::new(std::cell::Cell::new(false));
 
         let ml = Self {
             widget: main_box,
             list_box,
             search_entry: search_entry.clone(),
-            load_more_btn,
             model,
             sort_field: sort_field.clone(),
             sort_ascending: sort_ascending.clone(),
@@ -133,7 +128,32 @@ impl MessageList {
             filter_query: filter_query.clone(),
             folders,
             on_server_search: on_server_search.clone(),
+            on_load_more: on_load_more.clone(),
+            has_more: has_more.clone(),
+            loading_more: loading_more.clone(),
         };
+
+        // Infinite scroll: load more when near bottom
+        {
+            let hm = has_more.clone();
+            let lm = loading_more.clone();
+            let olm = on_load_more.clone();
+            scrolled.vadjustment().connect_value_changed(move |adj| {
+                if !hm.get() || lm.get() {
+                    return;
+                }
+                let value = adj.value();
+                let upper = adj.upper();
+                let page = adj.page_size();
+                // Trigger when within 100px of the bottom
+                if value + page + 100.0 >= upper {
+                    lm.set(true);
+                    if let Some(ref cb) = *olm.borrow() {
+                        cb();
+                    }
+                }
+            });
+        }
 
         // Search handler
         {
@@ -277,7 +297,12 @@ impl MessageList {
     }
 
     pub fn set_has_more(&self, has_more: bool) {
-        self.load_more_btn.set_visible(has_more);
+        self.has_more.set(has_more);
+        self.loading_more.set(false);
+    }
+
+    pub fn set_on_load_more(&self, cb: impl Fn() + 'static) {
+        *self.on_load_more.borrow_mut() = Some(Box::new(cb));
     }
 
     pub fn set_on_server_search(&self, cb: impl Fn(String) + 'static) {

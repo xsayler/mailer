@@ -280,7 +280,7 @@ impl MailerWindow {
             });
         }
 
-        // Load more button
+        // Infinite scroll: load more on scroll to bottom
         {
             let msg_list_lm = message_list.clone();
             let imap_lm = imap_client.clone();
@@ -289,12 +289,11 @@ impl MailerWindow {
             let spinner_lm = spinner.clone();
             let toast_lm = toast_overlay.clone();
 
-            message_list.load_more_btn.connect_clicked(move |_| {
+            message_list.set_on_load_more(move || {
                 let Some(client) = imap_lm.borrow().clone() else { return };
                 let folder = state_lm.borrow().selected_folder.clone().unwrap_or_default();
                 let offset = state_lm.borrow().loaded_count;
 
-                status_lm.set_text(t("status.refreshing"));
                 spinner_lm.set_spinning(true);
 
                 let msg_list = msg_list_lm.clone();
@@ -317,6 +316,7 @@ impl MailerWindow {
                                 status2.set_text(&tf("status.message_count", &[&count.to_string()]));
                             }
                             Err(e) => {
+                                msg_list.set_has_more(false);
                                 toast2.add_toast(adw::Toast::new(&tf("error.generic", &[&e.to_string()])));
                                 status2.set_text(t("status.connected"));
                             }
