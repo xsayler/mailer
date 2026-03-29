@@ -1,6 +1,6 @@
 use crate::i18n::t;
 use crate::mail::models::{MailFolder, MailMessage, MailMessageObject};
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk::gio;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,6 +10,7 @@ pub enum SortField {
     Date,
     Sender,
     Subject,
+    Unread,
 }
 
 pub struct MessageList {
@@ -74,6 +75,11 @@ impl MessageList {
         subject_btn.add_css_class("flat");
         subject_btn.add_css_class("caption");
 
+        let unread_btn = gtk::ToggleButton::with_label(t("sort.unread"));
+        unread_btn.set_group(Some(&date_btn));
+        unread_btn.add_css_class("flat");
+        unread_btn.add_css_class("caption");
+
         let dir_btn = gtk::Button::from_icon_name("view-sort-descending-symbolic");
         dir_btn.add_css_class("flat");
         dir_btn.set_tooltip_text(Some("↓"));
@@ -81,6 +87,7 @@ impl MessageList {
         sort_bar.append(&date_btn);
         sort_bar.append(&sender_btn);
         sort_bar.append(&subject_btn);
+        sort_bar.append(&unread_btn);
         sort_bar.append(&dir_btn);
 
         // Load more button
@@ -198,6 +205,21 @@ impl MessageList {
             });
         }
         {
+            let sf = sort_field.clone();
+            let sa = sort_ascending.clone();
+            let msgs = messages.clone();
+            let srt = sorted.clone();
+            let fq = filter_query.clone();
+            let model = ml.model.clone();
+            let lb = ml.list_box.clone();
+            unread_btn.connect_toggled(move |btn| {
+                if btn.is_active() {
+                    sf.set(SortField::Unread);
+                    filter_and_sort(&model, &msgs.borrow(), &fq.borrow(), sf.get(), sa.get(), &lb, &srt);
+                }
+            });
+        }
+        {
             let sf = sort_field;
             let sa = sort_ascending;
             let msgs = messages;
@@ -283,6 +305,23 @@ impl MessageList {
         );
     }
 
+    pub fn update_flagged_status(&self, uid: u32, flagged: bool) {
+        for msg in self.messages.borrow_mut().iter_mut() {
+            if msg.uid == uid {
+                msg.is_flagged = flagged;
+            }
+        }
+        filter_and_sort(
+            &self.model,
+            &self.messages.borrow(),
+            &self.filter_query.borrow(),
+            self.sort_field.get(),
+            self.sort_ascending.get(),
+            &self.list_box,
+            &self.sorted,
+        );
+    }
+
     pub fn update_read_status(&self, uid: u32, read: bool) {
         for msg in self.messages.borrow_mut().iter_mut() {
             if msg.uid == uid {
@@ -301,11 +340,17 @@ impl MessageList {
     }
 
     fn create_message_row(msg: &MailMessageObject) -> gtk::Widget {
+        let outer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        outer.set_margin_start(8);
+        outer.set_margin_end(12);
+        outer.set_margin_top(8);
+        outer.set_margin_bottom(8);
+
+        let avatar = adw::Avatar::new(32, Some(&msg.from_display()), true);
+        outer.append(&avatar);
+
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        vbox.set_margin_start(12);
-        vbox.set_margin_end(12);
-        vbox.set_margin_top(8);
-        vbox.set_margin_bottom(8);
+        vbox.set_hexpand(true);
 
         let top_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
 
@@ -317,6 +362,12 @@ impl MessageList {
             from_label.add_css_class("heading");
         }
         top_row.append(&from_label);
+
+        if msg.is_flagged() {
+            let star = gtk::Image::from_icon_name("starred-symbolic");
+            star.set_pixel_size(14);
+            top_row.append(&star);
+        }
 
         let date_label = gtk::Label::new(Some(&msg.date_display()));
         date_label.add_css_class("dim-label");
@@ -343,7 +394,8 @@ impl MessageList {
             vbox.append(&preview_label);
         }
 
-        vbox.upcast()
+        outer.append(&vbox);
+        outer.upcast()
     }
 }
 
@@ -389,6 +441,9 @@ fn filter_and_sort(
                 let b_subj = b.subject.to_lowercase();
                 a_subj.cmp(&b_subj)
             }
+            SortField::Unread => {
+                a.is_read.cmp(&b.is_read) // false < true, unread first
+            }
         };
         if ascending { cmp } else { cmp.reverse() }
     });
@@ -401,5 +456,6 @@ fn filter_and_sort(
 
     if let Some(first) = list_box.row_at_index(0) {
         list_box.select_row(Some(&first));
+        list_box.grab_focus();
     }
 }

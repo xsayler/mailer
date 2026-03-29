@@ -230,6 +230,18 @@ impl ImapClient {
                 })
                 .unwrap_or_default();
 
+            let cc = parsed
+                .cc()
+                .map(|a| {
+                    a.iter()
+                        .map(|a| Address {
+                            name: a.name.as_ref().map(|n| n.to_string()),
+                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let date = parsed.date().and_then(|d| {
                 DateTime::parse_from_rfc3339(&d.to_rfc3339())
                     .ok()
@@ -263,6 +275,7 @@ impl ImapClient {
                 subject,
                 from,
                 to,
+                cc,
                 date,
                 is_read,
                 is_flagged,
@@ -286,6 +299,18 @@ impl ImapClient {
                 self.reset_session().await;
                 self.ensure_connected().await?;
                 self.store_flags_inner(folder, uid, "\\Seen", read).await
+            }
+        }
+    }
+
+    pub async fn set_flagged(&self, folder: &str, uid: u32, flagged: bool) -> Result<(), MailError> {
+        match self.store_flags_inner(folder, uid, "\\Flagged", flagged).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                info!("set_flagged failed ({e}), reconnecting...");
+                self.reset_session().await;
+                self.ensure_connected().await?;
+                self.store_flags_inner(folder, uid, "\\Flagged", flagged).await
             }
         }
     }
@@ -329,11 +354,10 @@ impl ImapClient {
 
         let mut counts = Vec::new();
         for folder in folders {
-            let result = sess.examine(folder).await;
+            let result = sess.status(folder, "(UNSEEN)").await;
             match result {
-                Ok(_) => {
-                    let search_result = sess.search("UNSEEN").await;
-                    let count = search_result.map(|s| s.len() as u32).unwrap_or(0);
+                Ok(mailbox) => {
+                    let count = mailbox.unseen.unwrap_or(0) as u32;
                     counts.push((folder.clone(), count));
                 }
                 Err(_) => {
@@ -460,6 +484,18 @@ impl ImapClient {
                 })
                 .unwrap_or_default();
 
+            let cc = parsed
+                .cc()
+                .map(|a| {
+                    a.iter()
+                        .map(|a| Address {
+                            name: a.name.as_ref().map(|n| n.to_string()),
+                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let date = parsed.date().and_then(|d| {
                 DateTime::parse_from_rfc3339(&d.to_rfc3339())
                     .ok()
@@ -493,6 +529,7 @@ impl ImapClient {
                 subject,
                 from,
                 to,
+                cc,
                 date,
                 is_read,
                 is_flagged,

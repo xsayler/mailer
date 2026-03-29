@@ -159,6 +159,67 @@ impl FolderList {
         row
     }
 
+    /// Adjust unread count by delta without server fetch. Returns new total unread across all folders.
+    pub fn adjust_unread_count(&self, folder_path: &str, delta: i32) -> u32 {
+        let mut total_unread: u32 = 0;
+        let mut i = 0;
+        while let Some(row) = self.widget.row_at_index(i) {
+            let path = row.widget_name().to_string();
+            if let Some(hbox) = row.child() {
+                let hbox = hbox.downcast_ref::<gtk::Box>().unwrap();
+                let mut current: u32 = 0;
+                // Read current badge value
+                if let Some(ref widget) = hbox.last_child() {
+                    if widget.css_classes().iter().any(|c| c == "badge-label") {
+                        if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                            current = label.text().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                if path == folder_path {
+                    let new_count = (current as i32 + delta).max(0) as u32;
+                    // Remove old badge
+                    if let Some(ref widget) = hbox.last_child() {
+                        if widget.css_classes().iter().any(|c| c == "badge-label") {
+                            hbox.remove(widget);
+                        }
+                    }
+                    if new_count > 0 {
+                        let badge = gtk::Label::new(Some(&new_count.to_string()));
+                        badge.add_css_class("dim-label");
+                        badge.add_css_class("badge-label");
+                        hbox.append(&badge);
+                    }
+                    total_unread += new_count;
+                } else {
+                    total_unread += current;
+                }
+            }
+            i += 1;
+        }
+        total_unread
+    }
+
+    /// Get total unread count across all folders.
+    pub fn total_unread(&self) -> u32 {
+        let mut total: u32 = 0;
+        let mut i = 0;
+        while let Some(row) = self.widget.row_at_index(i) {
+            if let Some(hbox) = row.child() {
+                let hbox = hbox.downcast_ref::<gtk::Box>().unwrap();
+                if let Some(ref widget) = hbox.last_child() {
+                    if widget.css_classes().iter().any(|c| c == "badge-label") {
+                        if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+                            total += label.text().parse::<u32>().unwrap_or(0);
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        total
+    }
+
     pub fn update_unread_counts(&self, counts: &[(String, u32)]) {
         let mut i = 0;
         while let Some(row) = self.widget.row_at_index(i) {

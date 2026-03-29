@@ -55,6 +55,19 @@ impl AppState {
         self.loaded_count = self.messages.len() as u32;
     }
 
+    pub fn update_flagged_status(&mut self, uid: u32, flagged: bool) {
+        for msg in &mut self.messages {
+            if msg.uid == uid {
+                msg.is_flagged = flagged;
+            }
+        }
+        if let Some(ref folder) = self.selected_folder {
+            if let Some(msg) = self.message_cache.get_mut(&(folder.clone(), uid)) {
+                msg.is_flagged = flagged;
+            }
+        }
+    }
+
     pub fn update_read_status(&mut self, uid: u32, read: bool) {
         for msg in &mut self.messages {
             if msg.uid == uid {

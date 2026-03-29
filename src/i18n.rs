@@ -166,10 +166,12 @@ pub fn t(key: &str) -> &'static str {
         ("sort.sender", Locale::Ru) => "Отправитель",
         ("sort.subject", Locale::En) => "Subject",
         ("sort.subject", Locale::Ru) => "Тема",
+        ("sort.unread", Locale::En) => "Unread",
+        ("sort.unread", Locale::Ru) => "Непрочитанные",
 
         // Search
-        ("search.placeholder", Locale::En) => "Search messages...",
-        ("search.placeholder", Locale::Ru) => "Поиск сообщений...",
+        ("search.placeholder", Locale::En) => "Search on server...",
+        ("search.placeholder", Locale::Ru) => "Поиск на сервере...",
         ("search.no_results", Locale::En) => "No messages found",
         ("search.no_results", Locale::Ru) => "Сообщения не найдены",
 
@@ -184,6 +186,38 @@ pub fn t(key: &str) -> &'static str {
         ("menu.mark_unread", Locale::Ru) => "Отметить как непрочитанное",
         ("menu.reply", Locale::En) => "Reply",
         ("menu.reply", Locale::Ru) => "Ответить",
+        ("menu.reply_all", Locale::En) => "Reply All",
+        ("menu.reply_all", Locale::Ru) => "Ответить всем",
+        ("menu.forward", Locale::En) => "Forward",
+        ("menu.forward", Locale::Ru) => "Переслать",
+        ("menu.star", Locale::En) => "Star",
+        ("menu.star", Locale::Ru) => "Отметить звёздочкой",
+        ("menu.unstar", Locale::En) => "Unstar",
+        ("menu.unstar", Locale::Ru) => "Снять звёздочку",
+
+        // Tooltips extras
+        ("tooltip.reply_all", Locale::En) => "Reply All",
+        ("tooltip.reply_all", Locale::Ru) => "Ответить всем",
+        ("tooltip.forward", Locale::En) => "Forward",
+        ("tooltip.forward", Locale::Ru) => "Переслать",
+
+        // Compose extras
+        ("compose.reply_all_title", Locale::En) => "Reply All",
+        ("compose.reply_all_title", Locale::Ru) => "Ответ всем",
+        ("compose.forward_title", Locale::En) => "Forward",
+        ("compose.forward_title", Locale::Ru) => "Пересылка",
+
+        // Connection
+        ("status.reconnecting", Locale::En) => "Reconnecting...",
+        ("status.reconnecting", Locale::Ru) => "Переподключение...",
+
+        // Undo send
+        ("toast.sending_undo", Locale::En) => "Sending message...",
+        ("toast.sending_undo", Locale::Ru) => "Отправка сообщения...",
+        ("toast.undo", Locale::En) => "Undo",
+        ("toast.undo", Locale::Ru) => "Отменить",
+        ("toast.send_cancelled", Locale::En) => "Send cancelled",
+        ("toast.send_cancelled", Locale::Ru) => "Отправка отменена",
 
         // Attachments
         ("attachment.title", Locale::En) => "Attachments",
@@ -283,6 +317,12 @@ pub fn tf(key: &str, args: &[&str]) -> String {
 
         ("compose.re_subject", Locale::En) => "Re: {}",
         ("compose.re_subject", Locale::Ru) => "Re: {}",
+
+        ("compose.fwd_subject", Locale::En) => "Fwd: {}",
+        ("compose.fwd_subject", Locale::Ru) => "Fwd: {}",
+
+        ("app.title_unread", Locale::En) => "Mailer ({})",
+        ("app.title_unread", Locale::Ru) => "Почта ({})",
 
         ("notification.new_mail_from", Locale::En) => "From: {}",
         ("notification.new_mail_from", Locale::Ru) => "От: {}",

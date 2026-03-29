@@ -34,6 +34,7 @@ oo7 = { version = "0.6", features = ["tokio"] }
 
 # Cache
 lru = "0.12"
+bincode = "1"
 
 # HTML sanitization
 ammonia = "4"

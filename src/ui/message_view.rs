@@ -1,6 +1,7 @@
 use crate::i18n::{t, tf};
 use crate::mail::models::MailMessage;
 use adw::prelude::*;
+use gtk::glib;
 use webkit6::prelude::*;
 
 pub struct MessageView {
@@ -204,6 +205,17 @@ impl MessageView {
             self.attachment_box.append(&label);
 
             for att in &msg.attachments {
+                // Image preview thumbnail
+                if att.content_type.starts_with("image/") && !att.data.is_empty() {
+                    let bytes = glib::Bytes::from(&att.data);
+                    if let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) {
+                        let picture = gtk::Picture::for_paintable(&texture);
+                        picture.set_size_request(48, 48);
+                        picture.set_content_fit(gtk::ContentFit::Contain);
+                        self.attachment_box.append(&picture);
+                    }
+                }
+
                 let size_str = if att.size >= 1_048_576 {
                     tf("attachment.size_mb", &[&format!("{:.1}", att.size as f64 / 1_048_576.0)])
                 } else {

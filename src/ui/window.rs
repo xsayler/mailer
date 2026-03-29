@@ -51,6 +51,14 @@ impl MailerWindow {
         reply_btn.set_tooltip_text(Some(t("tooltip.reply")));
         header.pack_start(&reply_btn);
 
+        let reply_all_btn = gtk::Button::from_icon_name("mail-reply-all-symbolic");
+        reply_all_btn.set_tooltip_text(Some(t("tooltip.reply_all")));
+        header.pack_start(&reply_all_btn);
+
+        let forward_btn = gtk::Button::from_icon_name("mail-forward-symbolic");
+        forward_btn.set_tooltip_text(Some(t("tooltip.forward")));
+        header.pack_start(&forward_btn);
+
         let delete_btn = gtk::Button::from_icon_name("user-trash-symbolic");
         delete_btn.set_tooltip_text(Some(t("tooltip.delete")));
         header.pack_start(&delete_btn);
@@ -116,6 +124,10 @@ impl MailerWindow {
         status_bar.set_margin_end(8);
         status_bar.set_margin_top(4);
         status_bar.set_margin_bottom(4);
+
+        let conn_icon = Rc::new(gtk::Image::from_icon_name("network-offline-symbolic"));
+        conn_icon.set_pixel_size(12);
+        status_bar.append(conn_icon.as_ref());
 
         let status_label = Rc::new(gtk::Label::new(Some(t("status.not_connected"))));
         status_label.add_css_class("dim-label");
@@ -353,6 +365,8 @@ impl MailerWindow {
             let msg_list2 = message_list.clone();
             let imap_auto = imap_client.clone();
             let state_auto = state.clone();
+            let fl_auto = folder_list.clone();
+            let win_auto = window.clone();
 
             message_list.list_box.connect_row_selected(move |_, row| {
                 let Some(row) = row else { return };
@@ -366,6 +380,8 @@ impl MailerWindow {
                         let imap = imap_auto.clone();
                         let state = state_auto.clone();
                         let ml = msg_list2.clone();
+                        let fl = fl_auto.clone();
+                        let win = win_auto.clone();
                         glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
                             let Some(client) = imap.borrow().clone() else { return };
                             let folder = state.borrow().selected_folder.clone().unwrap_or_default();
@@ -377,6 +393,9 @@ impl MailerWindow {
                                     if result.is_ok() {
                                         st.borrow_mut().update_read_status(uid, true);
                                         ml.update_read_status(uid, true);
+                                        let folder = st.borrow().selected_folder.clone().unwrap_or_default();
+                                        let total = fl.adjust_unread_count(&folder, -1);
+                                        update_window_title(&win, total);
                                     }
                                 },
                             );
@@ -409,6 +428,7 @@ impl MailerWindow {
                 };
                 let uid = msg.uid;
                 let is_read = msg.is_read;
+                let is_flagged = msg.is_flagged;
 
                 let menu = gtk::gio::Menu::new();
                 menu.append(
@@ -417,6 +437,12 @@ impl MailerWindow {
                 );
                 menu.append(Some(t("menu.delete")), Some("ctx.delete"));
                 menu.append(Some(t("menu.reply")), Some("ctx.reply"));
+                menu.append(Some(t("menu.reply_all")), Some("ctx.reply-all"));
+                menu.append(Some(t("menu.forward")), Some("ctx.forward"));
+                menu.append(
+                    Some(if is_flagged { t("menu.unstar") } else { t("menu.star") }),
+                    Some("ctx.toggle-star"),
+                );
 
                 // Move submenu
                 let move_menu = gtk::gio::Menu::new();
@@ -512,6 +538,71 @@ impl MailerWindow {
                     });
                 }
                 action_group.add_action(&reply_action);
+
+                // Reply All action
+                let reply_all_action = gtk::gio::SimpleAction::new("reply-all", None);
+                {
+                    let win = win_ctx.clone();
+                    let msg2 = msg.clone();
+                    let imap_ra = imap_ctx.clone();
+                    reply_all_action.connect_activate(move |_, _| {
+                        let config = AppConfig::load();
+                        let Some(account) = config.first_account() else { return };
+                        let reply_to = msg2.from.first().map(|a| a.email.clone()).unwrap_or_default();
+                        let cc_addrs: Vec<String> = msg2.to.iter().chain(msg2.cc.iter())
+                            .filter(|a| a.email != account.email)
+                            .map(|a| a.to_string())
+                            .collect();
+                        let cc = cc_addrs.join(", ");
+                        let body = msg2.body_text.as_deref().unwrap_or("");
+                        compose_window::show_reply_all_window(&win, account.clone(), &reply_to, &cc, &msg2.subject, body, imap_ra.borrow().clone());
+                    });
+                }
+                action_group.add_action(&reply_all_action);
+
+                // Forward action
+                let forward_action = gtk::gio::SimpleAction::new("forward", None);
+                {
+                    let win = win_ctx.clone();
+                    let msg2 = msg.clone();
+                    let imap_fwd = imap_ctx.clone();
+                    forward_action.connect_activate(move |_, _| {
+                        let config = AppConfig::load();
+                        let Some(account) = config.first_account() else { return };
+                        compose_window::show_forward_window(&win, account.clone(), &msg2, imap_fwd.borrow().clone());
+                    });
+                }
+                action_group.add_action(&forward_action);
+
+                // Star toggle action
+                let star_action = gtk::gio::SimpleAction::new("toggle-star", None);
+                {
+                    let client = imap_ctx.borrow().clone();
+                    let folder = state_ctx.borrow().selected_folder.clone().unwrap_or_default();
+                    let ml = msg_list_ctx.clone();
+                    let st = state_ctx.clone();
+                    let toast = toast_ctx.clone();
+                    star_action.connect_activate(move |_, _| {
+                        let Some(client) = client.clone() else { return };
+                        let new_flagged = !is_flagged;
+                        let ml = ml.clone();
+                        let st = st.clone();
+                        let toast = toast.clone();
+                        let folder = folder.clone();
+                        runtime::spawn_on_main(
+                            async move { client.set_flagged(&folder, uid, new_flagged).await },
+                            move |result| {
+                                if result.is_ok() {
+                                    st.borrow_mut().update_flagged_status(uid, new_flagged);
+                                    ml.update_flagged_status(uid, new_flagged);
+                                } else if let Err(e) = result {
+                                    toast.add_toast(adw::Toast::new(&tf("error.generic", &[&e.to_string()])));
+                                }
+                            },
+                        );
+                    });
+                }
+                action_group.add_action(&star_action);
 
                 // Move action
                 let move_action = gtk::gio::SimpleAction::new("move-to", Some(&String::static_variant_type()));
@@ -609,6 +700,51 @@ impl MailerWindow {
                             body,
                             imap_reply.borrow().clone(),
                         );
+                    }
+                }
+            });
+        }
+
+        // Reply All button
+        {
+            let win_ra = window.clone();
+            let msg_list_ra = message_list.clone();
+            let dd_ra = account_dropdown.clone();
+            let imap_ra = imap_client.clone();
+            reply_all_btn.connect_clicked(move |_| {
+                let config = AppConfig::load();
+                let idx = dd_ra.selected() as usize;
+                let Some(account) = config.accounts.get(idx) else { return };
+                if let Some(row) = msg_list_ra.list_box.selected_row() {
+                    let i = row.index() as usize;
+                    if let Some(msg) = msg_list_ra.get_sorted_message(i) {
+                        let reply_to = msg.from.first().map(|a| a.email.clone()).unwrap_or_default();
+                        let cc_addrs: Vec<String> = msg.to.iter().chain(msg.cc.iter())
+                            .filter(|a| a.email != account.email)
+                            .map(|a| a.to_string())
+                            .collect();
+                        let cc = cc_addrs.join(", ");
+                        let body = msg.body_text.as_deref().unwrap_or("");
+                        compose_window::show_reply_all_window(&win_ra, account.clone(), &reply_to, &cc, &msg.subject, body, imap_ra.borrow().clone());
+                    }
+                }
+            });
+        }
+
+        // Forward button
+        {
+            let win_fwd = window.clone();
+            let msg_list_fwd = message_list.clone();
+            let dd_fwd = account_dropdown.clone();
+            let imap_fwd = imap_client.clone();
+            forward_btn.connect_clicked(move |_| {
+                let config = AppConfig::load();
+                let idx = dd_fwd.selected() as usize;
+                let Some(account) = config.accounts.get(idx) else { return };
+                if let Some(row) = msg_list_fwd.list_box.selected_row() {
+                    let i = row.index() as usize;
+                    if let Some(msg) = msg_list_fwd.get_sorted_message(i) {
+                        compose_window::show_forward_window(&win_fwd, account.clone(), &msg, imap_fwd.borrow().clone());
                     }
                 }
             });
@@ -844,6 +980,11 @@ impl MailerWindow {
                                     move |result| {
                                         if let Ok(counts) = result {
                                             fl2.update_unread_counts(&counts);
+                                            let win = fl2.widget.root()
+                                                .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok());
+                                            if let Some(ref w) = win {
+                                                update_window_title(w, fl2.total_unread());
+                                            }
                                         }
                                     },
                                 );
@@ -1205,6 +1346,8 @@ fn refresh_folders(
     status_label: Rc<gtk::Label>,
     message_list: Rc<MessageList>,
 ) {
+    let window = folder_list.widget.root()
+        .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok());
     let client2 = client.clone();
     runtime::spawn_on_main(
         async move { client.list_folders().await },
@@ -1217,11 +1360,15 @@ fn refresh_folders(
 
                 let folder_paths: Vec<String> = folders.iter().map(|f| f.path.clone()).collect();
                 let fl2 = folder_list.clone();
+                let win2 = window.clone();
                 runtime::spawn_on_main(
                     async move { client2.fetch_unread_counts(&folder_paths).await },
                     move |result| {
                         if let Ok(counts) = result {
                             fl2.update_unread_counts(&counts);
+                            if let Some(ref w) = win2 {
+                                update_window_title(w, fl2.total_unread());
+                            }
                         }
                     },
                 );
@@ -1330,6 +1477,11 @@ fn connect_account_inner(
                         move |result| {
                             if let Ok(counts) = result {
                                 fl2.update_unread_counts(&counts);
+                                let win = fl2.widget.root()
+                                    .and_then(|r| r.downcast::<adw::ApplicationWindow>().ok());
+                                if let Some(ref w) = win {
+                                    update_window_title(w, fl2.total_unread());
+                                }
                             }
                         },
                     );
@@ -1341,4 +1493,12 @@ fn connect_account_inner(
             }
         },
     );
+}
+
+fn update_window_title(window: &adw::ApplicationWindow, total_unread: u32) {
+    if total_unread > 0 {
+        window.set_title(Some(&tf("app.title_unread", &[&total_unread.to_string()])));
+    } else {
+        window.set_title(Some(t("app.title")));
+    }
 }

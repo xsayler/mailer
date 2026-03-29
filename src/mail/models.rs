@@ -44,6 +44,7 @@ pub struct MailMessage {
     pub subject: String,
     pub from: Vec<Address>,
     pub to: Vec<Address>,
+    pub cc: Vec<Address>,
     pub date: Option<DateTime<Utc>>,
     pub is_read: bool,
     pub is_flagged: bool,
@@ -215,6 +216,8 @@ mod imp {
         #[property(get, set)]
         pub is_read: RefCell<bool>,
         #[property(get, set)]
+        pub is_flagged: RefCell<bool>,
+        #[property(get, set)]
         pub preview: RefCell<String>,
     }
 
@@ -241,6 +244,7 @@ impl MailMessageObject {
             .property("from-display", msg.from_display())
             .property("date-display", msg.date_display())
             .property("is-read", msg.is_read)
+            .property("is-flagged", msg.is_flagged)
             .property("preview", msg.preview_text())
             .build()
     }

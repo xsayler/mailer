@@ -8,26 +8,25 @@ fn cache_dir() -> PathBuf {
 }
 
 fn folder_cache_path(folder: &str) -> PathBuf {
-    // Sanitize folder name for filesystem
     let safe_name: String = folder
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
         .collect();
-    cache_dir().join(format!("{safe_name}.json"))
+    cache_dir().join(format!("{safe_name}.bin"))
 }
 
 fn folders_cache_path() -> PathBuf {
-    cache_dir().join("_folders.json")
+    cache_dir().join("_folders.bin")
 }
 
-/// Save messages for a folder to disk.
+/// Save messages for a folder to disk (bincode format).
 pub fn save_messages(folder: &str, messages: &[MailMessage]) {
     let dir = cache_dir();
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
     let path = folder_cache_path(folder);
-    if let Ok(data) = serde_json::to_string(messages) {
+    if let Ok(data) = bincode::serialize(messages) {
         fs::write(path, data).ok();
     }
 }
@@ -35,18 +34,23 @@ pub fn save_messages(folder: &str, messages: &[MailMessage]) {
 /// Load cached messages for a folder from disk.
 pub fn load_messages(folder: &str) -> Option<Vec<MailMessage>> {
     let path = folder_cache_path(folder);
-    let data = fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&data).ok()
+    let data = fs::read(&path).ok()?;
+    bincode::deserialize(&data).ok().or_else(|| {
+        // Fallback: try JSON (migration from old format)
+        let json_path = path.with_extension("json");
+        let json = fs::read_to_string(&json_path).ok()?;
+        serde_json::from_str(&json).ok()
+    })
 }
 
-/// Save folder list to disk.
+/// Save folder list to disk (bincode format).
 pub fn save_folders(folders: &[MailFolder]) {
     let dir = cache_dir();
     if fs::create_dir_all(&dir).is_err() {
         return;
     }
     let path = folders_cache_path();
-    if let Ok(data) = serde_json::to_string(folders) {
+    if let Ok(data) = bincode::serialize(folders) {
         fs::write(path, data).ok();
     }
 }
@@ -54,8 +58,12 @@ pub fn save_folders(folders: &[MailFolder]) {
 /// Load cached folder list from disk.
 pub fn load_folders() -> Option<Vec<MailFolder>> {
     let path = folders_cache_path();
-    let data = fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&data).ok()
+    let data = fs::read(&path).ok()?;
+    bincode::deserialize(&data).ok().or_else(|| {
+        let json_path = path.with_extension("json");
+        let json = fs::read_to_string(&json_path).ok()?;
+        serde_json::from_str(&json).ok()
+    })
 }
 
 #[cfg(test)]
@@ -75,7 +83,6 @@ mod tests {
         assert_eq!(loaded[0].uid, 42);
         assert_eq!(loaded[0].subject, "Test cached");
 
-        // Cleanup
         let path = folder_cache_path("_test_cache_folder");
         fs::remove_file(path).ok();
     }
@@ -96,7 +103,5 @@ mod tests {
         let loaded = load_folders().unwrap();
         assert!(!loaded.is_empty());
         assert_eq!(loaded[0].name, "INBOX");
-
-        // Don't remove — other tests may need it
     }
 }

@@ -311,7 +311,6 @@ pub fn show_compose_window(
         }
 
         btn.set_sensitive(false);
-        btn.set_label(t("compose.sending"));
 
         let config = config.clone();
         let win = win.clone();
@@ -320,6 +319,29 @@ pub fn show_compose_window(
         let attachments = atts.borrow().clone();
         let sent = sent_flag.clone();
         let imap = imap_client.clone();
+
+        // Undo send: 5 second delay
+        let cancelled = Rc::new(std::cell::Cell::new(false));
+        let toast = adw::Toast::new(t("toast.sending_undo"));
+        toast.set_timeout(5);
+        toast.set_button_label(Some(t("toast.undo")));
+        {
+            let cancelled2 = cancelled.clone();
+            let btn2 = btn.clone();
+            toast.connect_button_clicked(move |_| {
+                cancelled2.set(true);
+                btn2.set_sensitive(true);
+                btn2.set_label(t("compose.send"));
+            });
+        }
+        toast_ov.add_toast(toast);
+
+        let cancelled3 = cancelled.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
+            if cancelled3.get() {
+                return;
+            }
+            btn.set_label(t("compose.sending"));
 
         runtime::spawn_on_main(
             async move {
@@ -356,12 +378,11 @@ pub fn show_compose_window(
                     win.close();
                 }
                 Err(e) => {
-                    btn.set_sensitive(true);
-                    btn.set_label(t("compose.send"));
                     toast_ov.add_toast(adw::Toast::new(&tf("compose.send_failed", &[&e.to_string()])));
                 }
             },
         );
+        }); // end timeout_add_local_once
     });
 
     window.present();
@@ -512,6 +533,85 @@ fn create_field_row(label_text: &str) -> (gtk::Box, gtk::Entry) {
     row.append(&entry);
 
     (row, entry)
+}
+
+pub fn show_reply_all_window(
+    parent: &impl IsA<gtk::Window>,
+    config: AccountConfig,
+    reply_to: &str,
+    cc: &str,
+    subject: &str,
+    original_body: &str,
+    imap_client: Option<Arc<ImapClient>>,
+) {
+    // Reuse show_compose_window with a pre-built draft
+    let re_subject = if subject.starts_with("Re:") {
+        subject.to_string()
+    } else {
+        tf("compose.re_subject", &[subject])
+    };
+    let quoted = original_body
+        .lines()
+        .map(|l| format!("> {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let sig = if config.signature.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n-- \n{}", config.signature)
+    };
+    let body = format!("{sig}\n\n{quoted}");
+
+    let draft = crate::mail::drafts::Draft {
+        id: String::new(),
+        to: reply_to.to_string(),
+        cc: cc.to_string(),
+        bcc: String::new(),
+        subject: re_subject,
+        body,
+        timestamp: 0,
+    };
+    show_compose_window(parent, config, Some(draft), imap_client);
+}
+
+pub fn show_forward_window(
+    parent: &impl IsA<gtk::Window>,
+    config: AccountConfig,
+    original: &crate::mail::models::MailMessage,
+    imap_client: Option<Arc<ImapClient>>,
+) {
+    let fwd_subject = if original.subject.starts_with("Fwd:") {
+        original.subject.clone()
+    } else {
+        tf("compose.fwd_subject", &[&original.subject])
+    };
+    let from_str = original.from_display();
+    let to_str: String = original.to.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ");
+    let date_str = original.date_display();
+    let body_text = original.body_text.as_deref().unwrap_or("");
+
+    let sig = if config.signature.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n-- \n{}", config.signature)
+    };
+    let body = format!(
+        "{sig}\n\n---------- Forwarded message ----------\nFrom: {from_str}\nDate: {date_str}\nSubject: {}\nTo: {to_str}\n\n{body_text}",
+        original.subject
+    );
+
+    // Pre-load original attachments
+    let draft = crate::mail::drafts::Draft {
+        id: String::new(),
+        to: String::new(),
+        cc: String::new(),
+        bcc: String::new(),
+        subject: fwd_subject,
+        body,
+        timestamp: 0,
+    };
+    // TODO: forward attachments (need to extend Draft or compose_window to accept them)
+    show_compose_window(parent, config, Some(draft), imap_client);
 }
 
 fn wrap_selection(text_view: &gtk::TextView, prefix: &str, suffix: &str) {
