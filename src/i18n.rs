@@ -316,8 +316,8 @@ pub fn tf(key: &str, args: &[&str]) -> String {
         ("status.loading_folder", Locale::En) => "Loading {}...",
         ("status.loading_folder", Locale::Ru) => "Загрузка {}...",
 
-        ("status.message_count", Locale::En) => "{} messages",
-        ("status.message_count", Locale::Ru) => "Сообщений: {}",
+        ("status.message_count", Locale::En) => "{} of {} messages",
+        ("status.message_count", Locale::Ru) => "{} из {} сообщений",
 
         ("error.generic", Locale::En) => "Error: {}",
         ("error.generic", Locale::Ru) => "Ошибка: {}",
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn tf_message_count() {
-        let result = tf("status.message_count", &["42"]);
+        let result = tf("status.message_count", &["42", "100"]);
         assert!(result.contains("42"));
     }
 

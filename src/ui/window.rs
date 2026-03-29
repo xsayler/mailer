@@ -189,7 +189,7 @@ impl MailerWindow {
                         let count = cached.len();
                         state2.borrow_mut().set_messages(&folder_path, cached.clone(), false);
                         msg_list.set_messages(&cached);
-                        status2.set_text(&tf("status.message_count", &[&count.to_string()]));
+                        status2.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
                     }
                 }
 
@@ -229,7 +229,7 @@ impl MailerWindow {
                                 disk_cache::save_messages(&folder, &messages);
                                 msg_list.set_messages(&messages);
                                 msg_list.set_has_more(state3.borrow().has_more());
-                                status3.set_text(&tf("status.message_count", &[&count.to_string()]));
+                                status3.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
 
                                 // Start IDLE on this folder
                                 let status_idle = status3.clone();
@@ -270,7 +270,7 @@ impl MailerWindow {
                                                         msg_list.set_messages(&messages);
                                                         msg_list.set_has_more(state.borrow().has_more());
                                                         let count = messages.len();
-                                                        status.set_text(&tf("status.message_count", &[&count.to_string()]));
+                                                        status.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
                                                     }
                                                 },
                                             );
@@ -352,7 +352,7 @@ impl MailerWindow {
                                 msg_list.append_messages(&messages);
                                 msg_list.set_has_more(state2.borrow().has_more());
                                 let count = state2.borrow().loaded_count;
-                                status2.set_text(&tf("status.message_count", &[&count.to_string()]));
+                                status2.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
                             }
                             Err(e) => {
                                 msg_list.set_has_more(false);
@@ -444,6 +444,38 @@ impl MailerWindow {
                     },
                 );
             });
+        }
+
+        // Double-click → open message in separate window
+        {
+            let dbl_gesture = gtk::GestureClick::new();
+            dbl_gesture.set_button(1);
+            let msg_list_dbl = message_list.clone();
+            let win_dbl = window.clone();
+            dbl_gesture.connect_released(move |gesture, n_press, _x, y| {
+                if n_press != 2 { return; }
+                let lb = &msg_list_dbl.list_box;
+                let Some(row) = lb.row_at_y(y as i32) else { return };
+                let i = row.index() as usize;
+                let Some(msg) = msg_list_dbl.get_sorted_message(i) else { return };
+
+                let dialog = adw::Window::builder()
+                    .title(&msg.subject)
+                    .default_width(700)
+                    .default_height(500)
+                    .transient_for(&win_dbl)
+                    .build();
+                let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                vbox.append(&adw::HeaderBar::new());
+                let view = MessageView::new();
+                view.show_message(&msg);
+                vbox.append(&view.widget);
+                dialog.set_content(Some(&vbox));
+                dialog.present();
+
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+            });
+            message_list.list_box.add_controller(dbl_gesture);
         }
 
         // Message click → show preview + auto mark read after 1s
@@ -601,7 +633,7 @@ impl MailerWindow {
                                     ml.remove_message_by_uid(uid);
                                     toast.add_toast(adw::Toast::new(t("toast.deleted")));
                                     let count = ml.message_count();
-                                    status.set_text(&tf("status.message_count", &[&count.to_string()]));
+                                    status.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
                                 }
                                 Err(e) => {
                                     toast.add_toast(adw::Toast::new(&tf("error.delete_failed", &[&e.to_string()])));
@@ -780,7 +812,7 @@ impl MailerWindow {
                                     ml.remove_message_by_uid(uid);
                                     toast.add_toast(adw::Toast::new(t("toast.moved")));
                                     let count = ml.message_count();
-                                    status.set_text(&tf("status.message_count", &[&count.to_string()]));
+                                    status.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
                                 }
                                 Err(e) => {
                                     toast.add_toast(adw::Toast::new(&tf("error.move_failed", &[&e.to_string()])));
@@ -911,14 +943,13 @@ impl MailerWindow {
             });
         }
 
-        // Delete button (with confirmation)
+        // Delete button (with undo toast)
         {
             let msg_list4 = message_list.clone();
             let imap5 = imap_client.clone();
             let state6 = state.clone();
             let toast5 = toast_overlay.clone();
             let status5 = status_label.clone();
-            let win_del = window.clone();
 
             delete_btn.connect_clicked(move |_| {
                 let Some(row) = msg_list4.list_box.selected_row() else {
@@ -939,50 +970,50 @@ impl MailerWindow {
                     .clone()
                     .unwrap_or_default();
 
-                let dialog = adw::MessageDialog::new(
-                    Some(&win_del),
-                    Some(t("dialog.confirm_delete")),
-                    None,
-                );
-                dialog.add_responses(&[
-                    ("cancel", t("dialog.cancel")),
-                    ("delete", t("dialog.delete")),
-                ]);
-                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-                dialog.set_default_response(Some("cancel"));
+                // Remove from UI immediately
+                state6.borrow_mut().remove_message(uid);
+                msg_list4.remove_message_by_uid(uid);
+                let count = msg_list4.message_count();
+                status5.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
 
-                let msg_list = msg_list4.clone();
-                let state7 = state6.clone();
-                let toast = toast5.clone();
-                let status = status5.clone();
+                // Show undo toast (5 seconds)
+                let cancelled = Rc::new(std::cell::Cell::new(false));
+                let toast = adw::Toast::new(t("toast.deleted"));
+                toast.set_timeout(5);
+                toast.set_button_label(Some(t("toast.undo")));
+                {
+                    let cancelled2 = cancelled.clone();
+                    let msg_list = msg_list4.clone();
+                    let state = state6.clone();
+                    let status = status5.clone();
+                    let msg_clone = msg.clone();
+                    let folder2 = folder.clone();
+                    toast.connect_button_clicked(move |_| {
+                        cancelled2.set(true);
+                        // Restore message in UI
+                        let mut msgs = state.borrow().messages.clone();
+                        msgs.push(msg_clone.clone());
+                        state.borrow_mut().set_messages(&folder2, msgs.clone(), false);
+                        msg_list.set_messages(&msgs);
+                        let count = msg_list.message_count();
+                        status.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
+                    });
+                }
+                toast5.add_toast(toast);
 
-                dialog.connect_response(None, move |_, response| {
-                    if response != "delete" { return; }
-                    status.set_text(t("status.deleting"));
-                    let msg_list = msg_list.clone();
-                    let state7 = state7.clone();
-                    let toast = toast.clone();
-                    let status = status.clone();
-                    let client = client.clone();
-                    let folder = folder.clone();
+                let cancelled3 = cancelled.clone();
+                let toast_err = toast5.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
+                    if cancelled3.get() { return; }
                     runtime::spawn_on_main(
                         async move { client.delete_message(&folder, uid).await },
-                        move |result| match result {
-                            Ok(()) => {
-                                state7.borrow_mut().remove_message(uid);
-                                msg_list.remove_message_by_uid(uid);
-                                toast.add_toast(adw::Toast::new(t("toast.deleted")));
-                                let count = msg_list.message_count();
-                                status.set_text(&tf("status.message_count", &[&count.to_string()]));
-                            }
-                            Err(e) => {
-                                toast.add_toast(adw::Toast::new(&tf("error.delete_failed", &[&e.to_string()])));
-                                status.set_text(t("status.connected"));
+                        move |result| {
+                            if let Err(e) = result {
+                                toast_err.add_toast(adw::Toast::new(&tf("error.delete_failed", &[&e.to_string()])));
                             }
                         },
                     );
                 });
-                dialog.present();
             });
         }
 
@@ -1191,6 +1222,7 @@ impl MailerWindow {
         app2.set_accels_for_action("win.search-focus", &["<Ctrl>f"]);
         app2.set_accels_for_action("win.refresh", &["F5"]);
         app2.set_accels_for_action("win.print", &["<Ctrl>p"]);
+        app2.set_accels_for_action("win.star", &["s"]);
 
         // Register actions
         let action_group = gtk::gio::SimpleActionGroup::new();
@@ -1228,6 +1260,38 @@ impl MailerWindow {
             mv_print.print();
         });
         action_group.add_action(&print_action);
+
+        let star_action = gtk::gio::SimpleAction::new("star", None);
+        {
+            let msg_list_star = message_list.clone();
+            let imap_star = imap_client.clone();
+            let state_star = state.clone();
+            let toast_star = toast_overlay.clone();
+            star_action.connect_activate(move |_, _| {
+                let Some(row) = msg_list_star.list_box.selected_row() else { return };
+                let i = row.index() as usize;
+                let Some(msg) = msg_list_star.get_sorted_message(i) else { return };
+                let uid = msg.uid;
+                let new_flagged = !msg.is_flagged;
+                let Some(client) = imap_star.borrow().clone() else { return };
+                let folder = state_star.borrow().selected_folder.clone().unwrap_or_default();
+                let ml = msg_list_star.clone();
+                let st = state_star.clone();
+                let toast = toast_star.clone();
+                runtime::spawn_on_main(
+                    async move { client.set_flagged(&folder, uid, new_flagged).await },
+                    move |result| {
+                        if result.is_ok() {
+                            st.borrow_mut().update_flagged_status(uid, new_flagged);
+                            ml.update_flagged_status(uid, new_flagged);
+                        } else if let Err(e) = result {
+                            toast.add_toast(adw::Toast::new(&tf("error.generic", &[&e.to_string()])));
+                        }
+                    },
+                );
+            });
+        }
+        action_group.add_action(&star_action);
 
         window.insert_action_group("win", Some(&action_group));
 
