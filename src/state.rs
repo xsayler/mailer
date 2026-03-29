@@ -26,7 +26,9 @@ impl AppState {
             messages: Vec::new(),
             folder_total: 0,
             loaded_count: 0,
-            message_cache: LruCache::new(NonZeroUsize::new(MAX_CACHE_SIZE).unwrap()),
+            message_cache: LruCache::new(
+                NonZeroUsize::new(MAX_CACHE_SIZE).unwrap_or(NonZeroUsize::MIN)
+            ),
         }
     }
 

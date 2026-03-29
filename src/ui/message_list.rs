@@ -39,7 +39,9 @@ impl MessageList {
         list_box.add_css_class("boxed-list");
 
         list_box.bind_model(Some(&model), |item| {
-            let msg_obj = item.downcast_ref::<MailMessageObject>().unwrap();
+            let Some(msg_obj) = item.downcast_ref::<MailMessageObject>() else {
+                return gtk::Label::new(None).upcast();
+            };
             Self::create_message_row(msg_obj)
         });
 

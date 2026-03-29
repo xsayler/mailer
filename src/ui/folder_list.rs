@@ -185,7 +185,7 @@ impl FolderList {
         while let Some(row) = self.widget.row_at_index(i) {
             let path = row.widget_name().to_string();
             if let Some(hbox) = row.child() {
-                let hbox = hbox.downcast_ref::<gtk::Box>().unwrap();
+                let Some(hbox) = hbox.downcast_ref::<gtk::Box>() else { continue };
                 let mut current: u32 = 0;
                 // Read current badge value
                 if let Some(ref widget) = hbox.last_child() {
@@ -225,7 +225,7 @@ impl FolderList {
         let mut i = 0;
         while let Some(row) = self.widget.row_at_index(i) {
             if let Some(hbox) = row.child() {
-                let hbox = hbox.downcast_ref::<gtk::Box>().unwrap();
+                let Some(hbox) = hbox.downcast_ref::<gtk::Box>() else { continue };
                 if let Some(ref widget) = hbox.last_child() {
                     if widget.css_classes().iter().any(|c| c == "badge-label") {
                         if let Some(label) = widget.downcast_ref::<gtk::Label>() {
@@ -246,7 +246,7 @@ impl FolderList {
             if let Some((_, count)) = counts.iter().find(|(p, _)| p == &folder_path) {
                 // Find the badge label or add one
                 if let Some(hbox) = row.child() {
-                    let hbox = hbox.downcast_ref::<gtk::Box>().unwrap();
+                    let Some(hbox) = hbox.downcast_ref::<gtk::Box>() else { continue };
                     // Remove old badge if exists (last child if it's a label with dim-label)
                     let mut last = hbox.last_child();
                     if let Some(ref widget) = last {

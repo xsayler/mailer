@@ -92,10 +92,11 @@ impl MessageView {
         web_view.set_vexpand(true);
         web_view.set_hexpand(true);
 
-        let settings = webkit6::prelude::WebViewExt::settings(&web_view).unwrap();
-        settings.set_auto_load_images(false);
-        settings.set_enable_javascript(false);
-        settings.set_allow_modal_dialogs(false);
+        if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web_view) {
+            settings.set_auto_load_images(false);
+            settings.set_enable_javascript(false);
+            settings.set_allow_modal_dialogs(false);
+        }
 
         // Let the HTML CSS handle colors (light/dark via prefers-color-scheme)
 
@@ -116,8 +117,9 @@ impl MessageView {
             let btn = load_images_btn.clone();
             let html_ref = current_html.clone();
             load_images_btn.connect_clicked(move |_| {
-                let settings = webkit6::prelude::WebViewExt::settings(&wv).unwrap();
-                settings.set_auto_load_images(true);
+                if let Some(settings) = webkit6::prelude::WebViewExt::settings(&wv) {
+                    settings.set_auto_load_images(true);
+                }
                 if let Some(ref html) = *html_ref.borrow() {
                     wv.load_html(html, None);
                 }
@@ -345,8 +347,9 @@ impl MessageView {
         }
 
         // Reset image blocking for new message
-        let settings = webkit6::prelude::WebViewExt::settings(&self.web_view).unwrap();
-        settings.set_auto_load_images(false);
+        if let Some(settings) = webkit6::prelude::WebViewExt::settings(&self.web_view) {
+            settings.set_auto_load_images(false);
+        }
         self.load_images_btn.set_visible(msg.body_html.is_some());
         *self.current_html.borrow_mut() = None;
 
