@@ -82,6 +82,22 @@ impl MailMessage {
             .unwrap_or_default()
     }
 
+    /// Normalized subject for thread grouping (strips Re:/Fwd: prefixes).
+    pub fn thread_subject(&self) -> String {
+        let mut s = self.subject.trim().to_lowercase();
+        loop {
+            let trimmed = s.trim_start();
+            if trimmed.starts_with("re:") || trimmed.starts_with("re :") {
+                s = trimmed[3..].trim_start().to_string();
+            } else if trimmed.starts_with("fwd:") || trimmed.starts_with("fwd :") {
+                s = trimmed[4..].trim_start().to_string();
+            } else {
+                break;
+            }
+        }
+        s
+    }
+
     pub fn preview_text(&self) -> String {
         if let Some(ref text) = self.body_text {
             text.chars().take(200).collect()
@@ -234,6 +250,8 @@ mod imp {
         #[property(get, set)]
         pub has_attachments: RefCell<bool>,
         #[property(get, set)]
+        pub thread_count: RefCell<u32>,
+        #[property(get, set)]
         pub preview: RefCell<String>,
     }
 
@@ -262,6 +280,7 @@ impl MailMessageObject {
             .property("is-read", msg.is_read)
             .property("is-flagged", msg.is_flagged)
             .property("has-attachments", !msg.attachments.is_empty())
+            .property("thread-count", 0u32)
             .property("preview", msg.preview_text())
             .build()
     }

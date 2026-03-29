@@ -82,6 +82,7 @@ pub trait ImapBackend: Send + Sync {
         query: &str,
         limit: u32,
     ) -> Result<Vec<MailMessage>, MailError>;
+    async fn set_flagged(&self, folder: &str, uid: u32, flagged: bool) -> Result<(), MailError>;
     async fn create_folder(&self, name: &str) -> Result<(), MailError>;
     async fn rename_folder(&self, from: &str, to: &str) -> Result<(), MailError>;
     async fn delete_folder(&self, name: &str) -> Result<(), MailError>;
@@ -112,6 +113,7 @@ mock! {
         async fn move_message(&self, src_folder: &str, uid: u32, dest_folder: &str) -> Result<(), MailError>;
         async fn fetch_unread_counts(&self, folders: &[String]) -> Result<Vec<(String, u32)>, MailError>;
         async fn search_messages(&self, folder: &str, query: &str, limit: u32) -> Result<Vec<MailMessage>, MailError>;
+        async fn set_flagged(&self, folder: &str, uid: u32, flagged: bool) -> Result<(), MailError>;
         async fn create_folder(&self, name: &str) -> Result<(), MailError>;
         async fn rename_folder(&self, from: &str, to: &str) -> Result<(), MailError>;
         async fn delete_folder(&self, name: &str) -> Result<(), MailError>;
@@ -795,5 +797,82 @@ mod workflow_tests {
         assert_eq!(messages[0].attachments[0].filename, "doc.pdf");
         assert_eq!(messages[0].attachments[1].filename, "image.png");
         assert_eq!(messages[0].attachments[0].size, 2048);
+    }
+
+    #[tokio::test]
+    async fn search_messages_returns_results() {
+        let mut mock = MockImap::new();
+        mock.expect_search_messages()
+            .with(eq("INBOX"), eq("test query"), eq(50u32))
+            .times(1)
+            .returning(|_, _, _| Ok(vec![make_msg(10, "Test result", "a@test.com", false)]));
+
+        let results = mock.search_messages("INBOX", "test query", 50).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].subject, "Test result");
+    }
+
+    #[tokio::test]
+    async fn set_flagged_success() {
+        let mut mock = MockImap::new();
+        mock.expect_set_flagged()
+            .with(eq("INBOX"), eq(5u32), eq(true))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let result = mock.set_flagged("INBOX", 5, true).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_folder_success() {
+        let mut mock = MockImap::new();
+        mock.expect_create_folder()
+            .with(eq("NewFolder"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let result = mock.create_folder("NewFolder").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn rename_folder_success() {
+        let mut mock = MockImap::new();
+        mock.expect_rename_folder()
+            .with(eq("OldName"), eq("NewName"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let result = mock.rename_folder("OldName", "NewName").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn delete_folder_success() {
+        let mut mock = MockImap::new();
+        mock.expect_delete_folder()
+            .with(eq("ToDelete"))
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let result = mock.delete_folder("ToDelete").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn send_with_bcc() {
+        let mut mock = MockSmtp::new();
+        mock.expect_send()
+            .withf(|to, _cc, bcc, _subj, _body, _atts| {
+                to == "to@test.com" && bcc == "hidden@test.com"
+            })
+            .times(1)
+            .returning(|_, _, _, _, _, _| Ok(()));
+
+        let result = mock
+            .send("to@test.com", "", "hidden@test.com", "Subject", "Body", &[])
+            .await;
+        assert!(result.is_ok());
     }
 }

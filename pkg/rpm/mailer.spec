@@ -1,14 +1,21 @@
 Name:           mailer
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
-Summary:        Email client
+Summary:        GTK4/Libadwaita email client
 License:        MIT
 URL:            https://github.com/sayler/mailer
 
 AutoReqProv:    no
 
+Requires:       gtk4
+Requires:       libadwaita
+Requires:       webkit6
+Requires:       gnome-keyring
+
 %description
-GTK4/Libadwaita email client.
+A modern email client built with GTK4 and Libadwaita.
+Supports IMAP/SMTP with TLS, multiple accounts, HTML rendering,
+message threading, drafts, signatures, and desktop notifications.
 
 %install
 install -Dm755 %{_project_dir}/target/release/mailer \

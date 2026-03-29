@@ -390,6 +390,14 @@ pub fn show_compose_window(
                 return;
             }
 
+            // Clone for error queue fallback
+            let q_email = config.email.clone();
+            let q_to = to.clone();
+            let q_cc = cc.clone();
+            let q_bcc = bcc.clone();
+            let q_subj = subject.clone();
+            let q_body = body.clone();
+
             runtime::spawn_on_main(
                 async move {
                     let mut config = config;
@@ -413,6 +421,13 @@ pub fn show_compose_window(
                 },
                 move |result| {
                     if let Err(e) = result {
+                        crate::mail::send_queue::enqueue(crate::mail::send_queue::QueuedMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            account_email: q_email,
+                            to: q_to, cc: q_cc, bcc: q_bcc,
+                            subject: q_subj, body: q_body,
+                            attachments: vec![],
+                        });
                         parent_toast.add_toast(adw::Toast::new(&tf("compose.send_failed", &[&e.to_string()])));
                     }
                 },

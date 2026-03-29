@@ -102,6 +102,8 @@ pub fn t(key: &str) -> &'static str {
         ("compose.cc", Locale::Ru) => "Копия:",
         ("compose.subject", Locale::En) => "Subject:",
         ("compose.subject", Locale::Ru) => "Тема:",
+        ("compose.quick_reply", Locale::En) => "Quick reply...",
+        ("compose.quick_reply", Locale::Ru) => "Быстрый ответ...",
         ("compose.enter_recipient", Locale::En) => "Please enter a recipient",
         ("compose.enter_recipient", Locale::Ru) => "Введите получателя",
         ("compose.bold", Locale::En) => "Bold",

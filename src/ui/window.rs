@@ -87,7 +87,7 @@ impl MailerWindow {
                 let dialog = adw::AboutWindow::builder()
                     .application_name("Mailer")
                     .application_icon("com.sayler.mailer")
-                    .version("0.1.0")
+                    .version("0.2.0")
                     .developer_name("sayler")
                     .transient_for(&win_about)
                     .modal(true)
@@ -110,30 +110,30 @@ impl MailerWindow {
 
         main_box.append(&header);
 
-        // Three-panel layout
+        // Three-panel layout (adaptive — panels shrinkable for narrow windows)
         let outer_paned = gtk::Paned::new(gtk::Orientation::Horizontal);
-        outer_paned.set_shrink_start_child(false);
+        outer_paned.set_shrink_start_child(true);
         outer_paned.set_shrink_end_child(false);
         outer_paned.set_position(200);
 
         let inner_paned = gtk::Paned::new(gtk::Orientation::Horizontal);
-        inner_paned.set_shrink_start_child(false);
-        inner_paned.set_shrink_end_child(false);
+        inner_paned.set_shrink_start_child(true);
+        inner_paned.set_shrink_end_child(true);
         inner_paned.set_position(350);
 
         let folder_list = Rc::new(FolderList::new());
         let folder_scroll = gtk::ScrolledWindow::new();
         folder_scroll.set_child(Some(&folder_list.widget));
         folder_scroll.set_vexpand(true);
-        folder_scroll.set_width_request(180);
+        folder_scroll.set_width_request(120);
         outer_paned.set_start_child(Some(&folder_scroll));
 
         let message_list = Rc::new(MessageList::new());
-        message_list.widget.set_width_request(280);
+        message_list.widget.set_width_request(200);
         inner_paned.set_start_child(Some(&message_list.widget));
 
         let message_view = Rc::new(MessageView::new());
-        message_view.widget.set_width_request(300);
+        message_view.widget.set_width_request(200);
         inner_paned.set_end_child(Some(&message_view.widget));
 
         outer_paned.set_end_child(Some(&inner_paned));
@@ -278,18 +278,36 @@ impl MailerWindow {
                                         glib::ControlFlow::Continue
                                     });
                                 }
-                                runtime::spawn_on_main(
-                                    async move {
-                                        client2.start_idle(&folder_for_idle, move || {
-                                            let _ = idle_tx.send(());
-                                        }).await
-                                    },
-                                    move |result| {
-                                        if result.is_ok() {
-                                            status_idle.set_text(t("status.idle"));
-                                        }
-                                    },
-                                );
+                                // Start IDLE with auto-reconnect on failure
+                                let client_idle = client2.clone();
+                                let folder_idle2 = folder_for_idle.clone();
+                                let status_idle_rc = Rc::new(status_idle);
+                                let start_idle_fn = {
+                                    let client = client_idle.clone();
+                                    let folder = folder_idle2.clone();
+                                    let status = status_idle_rc.clone();
+                                    Rc::new(move || {
+                                        let client = client.clone();
+                                        let folder = folder.clone();
+                                        let status = status.clone();
+                                        let idle_tx = idle_tx.clone();
+                                        runtime::spawn_on_main(
+                                            async move {
+                                                client.start_idle(&folder, move || {
+                                                    let _ = idle_tx.send(());
+                                                }).await
+                                            },
+                                            move |result| {
+                                                if result.is_ok() {
+                                                    status.set_text(t("status.idle"));
+                                                } else {
+                                                    status.set_text(t("status.reconnecting"));
+                                                }
+                                            },
+                                        );
+                                    })
+                                };
+                                (start_idle_fn.clone())();
                             }
                             Err(e) => {
                                 status3.set_text(t("status.error_loading"));
@@ -341,6 +359,54 @@ impl MailerWindow {
                                 toast2.add_toast(adw::Toast::new(&tf("error.generic", &[&e.to_string()])));
                                 status2.set_text(t("status.connected"));
                             }
+                        }
+                    },
+                );
+            });
+        }
+
+        // Quick reply handler
+        {
+            let msg_list_qr = message_list.clone();
+            let imap_qr = imap_client.clone();
+            let dd_qr = account_dropdown.clone();
+            let toast_qr = toast_overlay.clone();
+            message_view.set_on_quick_reply(move |body| {
+                let Some(row) = msg_list_qr.list_box.selected_row() else { return };
+                let i = row.index() as usize;
+                let Some(msg) = msg_list_qr.get_sorted_message(i) else { return };
+                let reply_to = msg.from.first().map(|a| a.email.clone()).unwrap_or_default();
+                let subject = if msg.subject.starts_with("Re:") {
+                    msg.subject.clone()
+                } else {
+                    format!("Re: {}", msg.subject)
+                };
+                let config = AppConfig::load();
+                let idx = dd_qr.selected() as usize;
+                let Some(account) = config.accounts.get(idx).cloned() else { return };
+                let imap = imap_qr.borrow().clone();
+                let toast = toast_qr.clone();
+                runtime::spawn_on_main(
+                    async move {
+                        let mut account = account;
+                        if account.password.is_empty() {
+                            if let Ok(pw) = crate::config::load_password(&account.email).await {
+                                account.password = pw;
+                            }
+                        }
+                        let raw = crate::mail::smtp_client::SmtpClient::send(
+                            &account, &reply_to, "", "", &subject, &body, &[],
+                        ).await?;
+                        if let Some(ref client) = imap {
+                            if let Ok(Some(sent_folder)) = client.find_sent_folder().await {
+                                client.append_to_folder(&sent_folder, &raw).await.ok();
+                            }
+                        }
+                        Ok::<(), MailError>(())
+                    },
+                    move |result: Result<(), MailError>| {
+                        if let Err(e) = result {
+                            toast.add_toast(adw::Toast::new(&tf("compose.send_failed", &[&e.to_string()])));
                         }
                     },
                 );
@@ -1444,6 +1510,34 @@ impl MailerWindow {
             header.pack_start(&drafts_btn);
         }
 
+        // Drag message to folder
+        {
+            let imap_drag = imap_client.clone();
+            let state_drag = state.clone();
+            let msg_list_drag = message_list.clone();
+            let toast_drag = toast_overlay.clone();
+            *folder_list.on_drop_message.borrow_mut() = Some(Box::new(move |uid: u32, dest_folder: String| {
+                let Some(client) = imap_drag.borrow().clone() else { return };
+                let src_folder = state_drag.borrow().selected_folder.clone().unwrap_or_default();
+                let ml = msg_list_drag.clone();
+                let st = state_drag.clone();
+                let toast = toast_drag.clone();
+                runtime::spawn_on_main(
+                    async move { client.move_message(&src_folder, uid, &dest_folder).await },
+                    move |result| match result {
+                        Ok(()) => {
+                            st.borrow_mut().remove_message(uid);
+                            ml.remove_message_by_uid(uid);
+                            toast.add_toast(adw::Toast::new(t("toast.moved")));
+                        }
+                        Err(e) => {
+                            toast.add_toast(adw::Toast::new(&tf("error.move_failed", &[&e.to_string()])));
+                        }
+                    },
+                );
+            }));
+        }
+
         // Save window state on close
         window.connect_close_request(|win| {
             let mut config = AppConfig::load();
@@ -1601,6 +1695,35 @@ fn connect_account_inner(
                     status_label.set_text(t("status.connected"));
                     message_list.set_folders(&folders);
                     folder_list.populate(&folders);
+
+                    // Flush send queue if any
+                    if !crate::mail::send_queue::is_empty() {
+                        let queue = crate::mail::send_queue::load_queue();
+                        for qm in queue {
+                            let id = qm.id.clone();
+                            runtime::spawn_on_main(
+                                async move {
+                                    let config = AppConfig::load();
+                                    let Some(account) = config.accounts.iter().find(|a| a.email == qm.account_email) else {
+                                        return;
+                                    };
+                                    let mut account = account.clone();
+                                    if account.password.is_empty() {
+                                        if let Ok(pw) = crate::config::load_password(&account.email).await {
+                                            account.password = pw;
+                                        }
+                                    }
+                                    if crate::mail::smtp_client::SmtpClient::send(
+                                        &account, &qm.to, &qm.cc, &qm.bcc, &qm.subject, &qm.body, &qm.attachments,
+                                    ).await.is_ok() {
+                                        crate::mail::send_queue::remove_from_queue(&id);
+                                        log::info!("Queued message sent: {}", qm.subject);
+                                    }
+                                },
+                                |_| {},
+                            );
+                        }
+                    }
 
                     // Fetch unread counts
                     let folder_paths: Vec<String> =

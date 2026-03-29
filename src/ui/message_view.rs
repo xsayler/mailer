@@ -2,6 +2,8 @@ use crate::i18n::{t, tf};
 use crate::mail::models::MailMessage;
 use adw::prelude::*;
 use gtk::glib;
+use std::cell::RefCell;
+use std::rc::Rc;
 use webkit6::prelude::*;
 
 pub struct MessageView {
@@ -14,7 +16,8 @@ pub struct MessageView {
     web_view: webkit6::WebView,
     attachment_box: gtk::Box,
     load_images_btn: gtk::Button,
-    current_html: std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    current_html: Rc<RefCell<Option<String>>>,
+    on_quick_reply: Rc<RefCell<Option<Box<dyn Fn(String)>>>>,
     stack: gtk::Stack,
 }
 
@@ -161,6 +164,55 @@ impl MessageView {
         content_box.append(&separator);
         content_box.append(&web_view);
 
+        // Quick reply panel
+        let reply_sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+        content_box.append(&reply_sep);
+
+        let reply_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        reply_box.set_margin_start(12);
+        reply_box.set_margin_end(12);
+        reply_box.set_margin_top(6);
+        reply_box.set_margin_bottom(6);
+
+        let reply_entry = gtk::Entry::new();
+        reply_entry.set_placeholder_text(Some(t("compose.quick_reply")));
+        reply_entry.set_hexpand(true);
+        reply_box.append(&reply_entry);
+
+        let reply_send_btn = gtk::Button::from_icon_name("mail-send-symbolic");
+        reply_send_btn.add_css_class("suggested-action");
+        reply_send_btn.add_css_class("circular");
+        reply_box.append(&reply_send_btn);
+
+        content_box.append(&reply_box);
+
+        let on_quick_reply: Rc<RefCell<Option<Box<dyn Fn(String)>>>> = Rc::new(RefCell::new(None));
+
+        {
+            let entry = reply_entry.clone();
+            let oqr = on_quick_reply.clone();
+            reply_send_btn.connect_clicked(move |_| {
+                let text = entry.text().to_string();
+                if text.trim().is_empty() { return; }
+                if let Some(ref cb) = *oqr.borrow() {
+                    cb(text);
+                }
+                entry.set_text("");
+            });
+        }
+        {
+            let entry = reply_entry.clone();
+            let oqr = on_quick_reply.clone();
+            reply_entry.connect_activate(move |_| {
+                let text = entry.text().to_string();
+                if text.trim().is_empty() { return; }
+                if let Some(ref cb) = *oqr.borrow() {
+                    cb(text);
+                }
+                entry.set_text("");
+            });
+        }
+
         stack.add_named(&content_box, Some("message"));
         stack.set_visible_child_name("empty");
 
@@ -179,6 +231,7 @@ impl MessageView {
             attachment_box,
             load_images_btn,
             current_html,
+            on_quick_reply,
             stack,
         }
     }
@@ -293,6 +346,10 @@ impl MessageView {
 
         self.web_view.load_html(&html, None);
         self.stack.set_visible_child_name("message");
+    }
+
+    pub fn set_on_quick_reply(&self, cb: impl Fn(String) + 'static) {
+        *self.on_quick_reply.borrow_mut() = Some(Box::new(cb));
     }
 
     pub fn print(&self) {

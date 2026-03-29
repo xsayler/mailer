@@ -408,13 +408,22 @@ impl MessageList {
 
         vbox.append(&top_row);
 
+        let subject_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let subject_label = gtk::Label::new(Some(&msg.subject()));
         subject_label.set_halign(gtk::Align::Start);
         subject_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        subject_label.set_hexpand(true);
         if !msg.is_read() {
             subject_label.add_css_class("heading");
         }
-        vbox.append(&subject_label);
+        subject_row.append(&subject_label);
+        if msg.thread_count() > 1 {
+            let badge = gtk::Label::new(Some(&msg.thread_count().to_string()));
+            badge.add_css_class("dim-label");
+            badge.add_css_class("caption");
+            subject_row.append(&badge);
+        }
+        vbox.append(&subject_row);
 
         let preview = msg.preview();
         if !preview.is_empty() {
@@ -427,6 +436,16 @@ impl MessageList {
         }
 
         outer.append(&vbox);
+
+        // Drag source for moving messages to folders
+        let drag_source = gtk::DragSource::new();
+        drag_source.set_actions(gtk::gdk::DragAction::MOVE);
+        let uid_val = msg.uid();
+        drag_source.connect_prepare(move |_, _, _| {
+            Some(gtk::gdk::ContentProvider::for_value(&gtk::glib::Value::from(&uid_val.to_string())))
+        });
+        outer.add_controller(drag_source);
+
         outer.upcast()
     }
 }
@@ -480,9 +499,20 @@ fn filter_and_sort(
         if ascending { cmp } else { cmp.reverse() }
     });
 
+    // Compute thread counts by normalized subject
+    let mut thread_counts = std::collections::HashMap::new();
+    for msg in &sorted {
+        *thread_counts.entry(msg.thread_subject()).or_insert(0u32) += 1;
+    }
+
     model.remove_all();
     for msg in &sorted {
-        model.append(&MailMessageObject::new(msg));
+        let obj = MailMessageObject::new(msg);
+        let count = thread_counts.get(&msg.thread_subject()).copied().unwrap_or(1);
+        if count > 1 {
+            obj.set_thread_count(count);
+        }
+        model.append(&obj);
     }
     *sorted_out.borrow_mut() = sorted;
 

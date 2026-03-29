@@ -1,5 +1,6 @@
 use crate::i18n::t;
 use crate::mail::models::MailFolder;
+use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,6 +10,7 @@ pub struct FolderList {
     pub on_create_folder: Rc<RefCell<Option<Box<dyn Fn()>>>>,
     pub on_rename_folder: Rc<RefCell<Option<Box<dyn Fn(String)>>>>,
     pub on_delete_folder: Rc<RefCell<Option<Box<dyn Fn(String)>>>>,
+    pub on_drop_message: Rc<RefCell<Option<Box<dyn Fn(u32, String)>>>>,
 }
 
 impl FolderList {
@@ -20,6 +22,7 @@ impl FolderList {
         let on_create_folder: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let on_rename_folder: Rc<RefCell<Option<Box<dyn Fn(String)>>>> = Rc::new(RefCell::new(None));
         let on_delete_folder: Rc<RefCell<Option<Box<dyn Fn(String)>>>> = Rc::new(RefCell::new(None));
+        let on_drop_message: Rc<RefCell<Option<Box<dyn Fn(u32, String)>>>> = Rc::new(RefCell::new(None));
 
         // Right-click context menu
         let gesture = gtk::GestureClick::new();
@@ -96,6 +99,7 @@ impl FolderList {
             on_create_folder,
             on_rename_folder,
             on_delete_folder,
+            on_drop_message,
         }
     }
 
@@ -152,9 +156,24 @@ impl FolderList {
 
         let row = gtk::ListBoxRow::new();
         row.set_child(Some(&hbox));
-
-        // Store folder path as widget name for retrieval on click
         row.set_widget_name(&folder.path);
+
+        // Drop target for message drag
+        let drop_target = gtk::DropTarget::new(glib::GString::static_type(), gtk::gdk::DragAction::MOVE);
+        let odm = self.on_drop_message.clone();
+        let folder_path = folder.path.clone();
+        drop_target.connect_drop(move |_, value, _x, _y| {
+            if let Ok(uid_str) = value.get::<glib::GString>() {
+                if let Ok(uid) = uid_str.parse::<u32>() {
+                    if let Some(ref cb) = *odm.borrow() {
+                        cb(uid, folder_path.clone());
+                        return true;
+                    }
+                }
+            }
+            false
+        });
+        row.add_controller(drop_target);
 
         row
     }
