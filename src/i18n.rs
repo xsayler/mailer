@@ -86,6 +86,8 @@ pub fn t(key: &str) -> &'static str {
         ("message.select_hint", Locale::Ru) => "Выберите сообщение для чтения",
         ("message.no_content", Locale::En) => "(no content)",
         ("message.no_content", Locale::Ru) => "(нет содержимого)",
+        ("message.unsubscribe", Locale::En) => "Unsubscribe",
+        ("message.unsubscribe", Locale::Ru) => "Отписаться",
 
         // Compose window
         ("compose.title", Locale::En) => "New Message",

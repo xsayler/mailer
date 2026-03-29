@@ -657,7 +657,9 @@ impl MailerWindow {
                         let Some(account) = config.first_account() else { return };
                         let reply_to = msg2.from.first().map(|a| a.email.clone()).unwrap_or_default();
                         let body = msg2.body_text.as_deref().unwrap_or("");
-                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body, imap_reply.borrow().clone(), toast_reply.clone());
+                        let mid = msg2.message_id.as_deref().unwrap_or("");
+                        let refs = msg2.references.join(" ");
+                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body, imap_reply.borrow().clone(), toast_reply.clone(), mid, &refs);
                     });
                 }
                 action_group.add_action(&reply_action);
@@ -882,6 +884,8 @@ impl MailerWindow {
                             .map(|a| a.email.clone())
                             .unwrap_or_default();
                         let body = msg.body_text.as_deref().unwrap_or("");
+                        let mid = msg.message_id.as_deref().unwrap_or("");
+                        let refs = msg.references.join(" ");
                         compose_window::show_reply_window(
                             &win3,
                             account.clone(),
@@ -890,6 +894,8 @@ impl MailerWindow {
                             body,
                             imap_reply.borrow().clone(),
                             toast_reply_btn.clone(),
+                            mid,
+                            &refs,
                         );
                     }
                 }

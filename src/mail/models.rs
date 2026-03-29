@@ -33,6 +33,7 @@ impl std::fmt::Display for Address {
 pub struct Attachment {
     pub filename: String,
     pub content_type: String,
+    pub content_id: Option<String>,
     pub size: usize,
     #[serde(skip)]
     pub data: Vec<u8>,
@@ -54,6 +55,7 @@ pub struct MailMessage {
     pub message_id: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
+    pub list_unsubscribe: Option<String>,
     #[serde(skip)]
     pub raw_source: Option<String>,
 }

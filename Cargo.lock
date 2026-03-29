@@ -1557,6 +1557,7 @@ dependencies = [
  "ammonia",
  "async-imap",
  "async-trait",
+ "base64",
  "bincode",
  "chrono",
  "env_logger",

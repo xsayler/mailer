@@ -61,17 +61,25 @@ fn parse_fetched_message(msg: &async_imap::types::Fetch, parser: &mail_parser::M
             let content_type = part.content_type()
                 .map(|ct: &mail_parser::ContentType| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
                 .unwrap_or_else(|| "application/octet-stream".to_string());
+            let content_id = part.content_id().map(|s| s.to_string());
             let data = part.contents().to_vec();
             let size = data.len();
-            Attachment { filename, content_type, size, data }
+            Attachment { filename, content_type, content_id, size, data }
         })
         .collect();
+
+    // List-Unsubscribe header (extract from raw source)
+    let list_unsubscribe = raw_source.as_ref().and_then(|src| {
+        src.lines()
+            .find(|l| l.to_lowercase().starts_with("list-unsubscribe:"))
+            .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
+    });
 
     Some(MailMessage {
         uid: msg.uid.unwrap_or(0),
         subject, from, to, cc, date, is_read, is_flagged,
         body_text, body_html, attachments,
-        message_id, in_reply_to, references, raw_source,
+        message_id, in_reply_to, references, list_unsubscribe, raw_source,
     })
 }
 

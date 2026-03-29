@@ -259,6 +259,23 @@ impl MessageView {
 
         self.date_label.set_text(&msg.date_display());
 
+        // Unsubscribe button
+        if let Some(ref unsub) = msg.list_unsubscribe {
+            // Extract URL from header (may be wrapped in < >)
+            let url = unsub.trim().trim_matches(|c| c == '<' || c == '>').to_string();
+            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+                let unsub_btn = gtk::Button::with_label(t("message.unsubscribe"));
+                unsub_btn.add_css_class("flat");
+                unsub_btn.add_css_class("caption");
+                unsub_btn.add_css_class("error");
+                unsub_btn.connect_clicked(move |_| {
+                    let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, gtk::gio::AppLaunchContext::NONE);
+                });
+                self.attachment_box.append(&unsub_btn);
+                self.attachment_box.set_visible(true);
+            }
+        }
+
         // Attachments
         // Clear old attachment buttons
         while let Some(child) = self.attachment_box.first_child() {
@@ -334,7 +351,20 @@ impl MessageView {
         *self.current_html.borrow_mut() = None;
 
         let html = if let Some(ref html_body) = msg.body_html {
-            let sanitized = sanitize_html(html_body);
+            // Replace CID references with inline data URIs
+            let mut resolved = html_body.clone();
+            for att in &msg.attachments {
+                if let Some(ref cid) = att.content_id {
+                    if att.content_type.starts_with("image/") && !att.data.is_empty() {
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&att.data);
+                        let data_uri = format!("data:{};base64,{}", att.content_type, b64);
+                        let cid_clean = cid.trim_matches(|c| c == '<' || c == '>');
+                        resolved = resolved.replace(&format!("cid:{cid_clean}"), &data_uri);
+                    }
+                }
+            }
+            let sanitized = sanitize_html(&resolved);
             let wrapped = wrap_html(&sanitized);
             *self.current_html.borrow_mut() = Some(wrapped.clone());
             wrapped

@@ -457,6 +457,8 @@ pub fn show_reply_window(
     original_body: &str,
     imap_client: Option<Arc<ImapClient>>,
     parent_toast: adw::ToastOverlay,
+    orig_message_id: &str,
+    orig_references: &str,
 ) {
     let window = adw::Window::builder()
         .title(t("compose.reply_title"))
@@ -529,6 +531,8 @@ pub fn show_reply_window(
     let subj_e = subject_entry.1.clone();
     let body_v = body_view.clone();
     let win = window.clone();
+    let reply_msg_id = orig_message_id.to_string();
+    let reply_refs = orig_references.to_string();
 
     send_btn.connect_clicked(move |_| {
         let to = to_e.text().to_string();
@@ -572,6 +576,8 @@ pub fn show_reply_window(
         parent_toast.add_toast(toast);
 
         let cancelled3 = cancelled.clone();
+        let reply_msg_id = reply_msg_id.clone();
+        let reply_refs = reply_refs.clone();
         glib::timeout_add_local_once(std::time::Duration::from_secs(5), move || {
             if cancelled3.get() {
                 return;
@@ -585,7 +591,7 @@ pub fn show_reply_window(
                             Err(e) => return Err(crate::mail::error::MailError::Auth(e)),
                         }
                     }
-                    let raw = SmtpClient::send(&config, &to, "", "", &subject, &body, &[]).await?;
+                    let raw = SmtpClient::send_threaded(&config, &to, "", "", &subject, &body, &[], &reply_msg_id.clone(), &reply_refs.clone()).await?;
                     if let Some(ref client) = imap {
                         if let Ok(Some(sent_folder)) = client.find_sent_folder().await {
                             client.append_to_folder(&sent_folder, &raw).await.ok();

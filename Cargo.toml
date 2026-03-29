@@ -46,6 +46,9 @@ ammonia = "4"
 # Draft IDs
 uuid = { version = "1", features = ["v4"] }
 
+# Base64
+base64 = "0.22"
+
 # Misc
 log = "0.4"
 env_logger = "0.11"

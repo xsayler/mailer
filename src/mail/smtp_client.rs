@@ -18,6 +18,20 @@ impl SmtpClient {
         body: &str,
         attachments: &[(String, Vec<u8>)],
     ) -> Result<Vec<u8>, MailError> {
+        Self::send_threaded(config, to, cc, bcc, subject, body, attachments, "", "").await
+    }
+
+    pub async fn send_threaded(
+        config: &AccountConfig,
+        to: &str,
+        cc: &str,
+        bcc: &str,
+        subject: &str,
+        body: &str,
+        attachments: &[(String, Vec<u8>)],
+        in_reply_to: &str,
+        references: &str,
+    ) -> Result<Vec<u8>, MailError> {
         let from = format!("{} <{}>", config.display_name, config.email)
             .parse()
             .map_err(|e| MailError::Smtp(format!("Invalid from address: {e}")))?;
@@ -28,6 +42,13 @@ impl SmtpClient {
             .from(from)
             .to(to_addr)
             .subject(subject);
+
+        if !in_reply_to.is_empty() {
+            msg_builder = msg_builder.in_reply_to(in_reply_to.to_string());
+        }
+        if !references.is_empty() {
+            msg_builder = msg_builder.references(references.to_string());
+        }
 
         for addr in cc.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             if let Ok(parsed) = addr.parse() {
