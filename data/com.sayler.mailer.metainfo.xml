@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.sayler.mailer</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Mailer</name>
+  <name xml:lang="ru">Почта</name>
+  <summary>Email client</summary>
+  <summary xml:lang="ru">Почтовый клиент</summary>
+  <description>
+    <p>A modern email client built with GTK4 and Libadwaita. Supports IMAP/SMTP with TLS, multiple accounts, HTML rendering, message threading, drafts, signatures, and desktop notifications.</p>
+    <p xml:lang="ru">Современный почтовый клиент на GTK4 и Libadwaita. Поддерживает IMAP/SMTP с TLS, несколько аккаунтов, отображение HTML, группировку по темам, черновики, подписи и уведомления на рабочем столе.</p>
+  </description>
+  <launchable type="desktop-id">com.sayler.mailer.desktop</launchable>
+  <url type="homepage">https://github.com/sayler/mailer</url>
+  <provides>
+    <binary>mailer</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.2.0" date="2026-03-29">
+      <description>
+        <p>Major feature release with threading, quick reply, drag-drop, adaptive layout, send queue, and many UX improvements.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-03-28">
+      <description>
+        <p>Initial release with core email functionality.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -24,11 +24,14 @@ install -Dm644 %{_project_dir}/data/icons/com.sayler.mailer.png \
     %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/com.sayler.mailer.png
 install -Dm644 %{_project_dir}/data/com.sayler.mailer.desktop \
     %{buildroot}%{_datadir}/applications/com.sayler.mailer.desktop
+install -Dm644 %{_project_dir}/data/com.sayler.mailer.metainfo.xml \
+    %{buildroot}%{_datadir}/metainfo/com.sayler.mailer.metainfo.xml
 
 %files
 %{_bindir}/mailer
 %{_datadir}/icons/hicolor/256x256/apps/com.sayler.mailer.png
 %{_datadir}/applications/com.sayler.mailer.desktop
+%{_datadir}/metainfo/com.sayler.mailer.metainfo.xml
 
 %post
 gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor/ 2>/dev/null || :

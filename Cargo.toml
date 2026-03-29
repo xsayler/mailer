@@ -2,6 +2,10 @@
 name = "mailer"
 version = "0.2.0"
 edition = "2024"
+authors = ["sayler"]
+description = "GTK4/Libadwaita email client with IMAP/SMTP support"
+license = "MIT"
+repository = "https://github.com/sayler/mailer"
 
 [dependencies]
 # UI
