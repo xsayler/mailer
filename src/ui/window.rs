@@ -796,8 +796,14 @@ impl MailerWindow {
 
                 let popover = gtk::PopoverMenu::from_model(Some(&menu));
                 popover.set_parent(&row);
-                popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                // x,y are relative to ListBox; pointing_to needs row-relative coords
+                if let Some(point) = lb.compute_point(&row, &gtk::graphene::Point::new(x as f32, y as f32)) {
+                    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(point.x() as i32, point.y() as i32, 1, 1)));
+                } else {
+                    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, 0, 1, 1)));
+                }
                 popover.set_has_arrow(false);
+                popover.set_halign(gtk::Align::Start);
                 popover.popup();
 
                 gesture.set_state(gtk::EventSequenceState::Claimed);
