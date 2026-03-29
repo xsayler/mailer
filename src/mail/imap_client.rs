@@ -17,6 +17,64 @@ use tokio_util::sync::CancellationToken;
 
 type ImapSession = Session<TlsStream<TcpStream>>;
 
+/// Parse a single fetched IMAP message into MailMessage.
+fn parse_fetched_message(msg: &async_imap::types::Fetch, parser: &mail_parser::MessageParser) -> Option<MailMessage> {
+    let flags: Vec<_> = msg.flags().collect();
+    let is_read = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
+    let is_flagged = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Flagged));
+
+    let raw = msg.body()?;
+    let parsed = parser.parse(raw)?;
+
+    let subject = parsed.subject().unwrap_or("(no subject)").to_string();
+
+    let map_addrs = |addr: &mail_parser::Address| -> Vec<Address> {
+        addr.iter().map(|a| Address {
+            name: a.name.as_ref().map(|n: &std::borrow::Cow<str>| n.to_string()),
+            email: a.address.as_ref().map(|e: &std::borrow::Cow<str>| e.to_string()).unwrap_or_default(),
+        }).collect()
+    };
+    let from = parsed.from().map(&map_addrs).unwrap_or_default();
+    let to = parsed.to().map(&map_addrs).unwrap_or_default();
+    let cc = parsed.cc().map(&map_addrs).unwrap_or_default();
+
+    let date = parsed.date().and_then(|d| {
+        DateTime::parse_from_rfc3339(&d.to_rfc3339())
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+    });
+
+    let body_text = parsed.body_text(0).map(|t| t.to_string());
+    let body_html = parsed.body_html(0).map(|t| t.to_string());
+
+    let message_id = parsed.message_id().map(|s| s.to_string());
+    let in_reply_to = parsed.in_reply_to().as_text().map(|s| s.to_string());
+    let references: Vec<String> = parsed.references().as_text_list()
+        .map(|list| list.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
+    let raw_source = Some(String::from_utf8_lossy(raw).to_string());
+
+    let attachments = parsed
+        .attachments()
+        .map(|part| {
+            let filename = part.attachment_name().unwrap_or("attachment").to_string();
+            let content_type = part.content_type()
+                .map(|ct: &mail_parser::ContentType| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
+                .unwrap_or_else(|| "application/octet-stream".to_string());
+            let data = part.contents().to_vec();
+            let size = data.len();
+            Attachment { filename, content_type, size, data }
+        })
+        .collect();
+
+    Some(MailMessage {
+        uid: msg.uid.unwrap_or(0),
+        subject, from, to, cc, date, is_read, is_flagged,
+        body_text, body_html, attachments,
+        message_id, in_reply_to, references, raw_source,
+    })
+}
+
 pub struct ImapClient {
     config: AccountConfig,
     session: Mutex<Option<ImapSession>>,
@@ -187,114 +245,10 @@ impl ImapClient {
             .await;
 
         let parser = mail_parser::MessageParser::default();
-        let mut result = Vec::new();
-        for msg in &messages {
-            let flags: Vec<_> = msg.flags().collect();
-            let is_read = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
-            let is_flagged = flags
-                .iter()
-                .any(|f| matches!(f, async_imap::types::Flag::Flagged));
-
-            let raw = match msg.body() {
-                Some(b) => b,
-                None => continue,
-            };
-            let parsed = match parser.parse(raw) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let subject = parsed.subject().unwrap_or("(no subject)").to_string();
-
-            let from = parsed
-                .from()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let to = parsed
-                .to()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let cc = parsed
-                .cc()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let date = parsed.date().and_then(|d| {
-                DateTime::parse_from_rfc3339(&d.to_rfc3339())
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-            });
-
-            let body_text = parsed.body_text(0).map(|t| t.to_string());
-            let body_html = parsed.body_html(0).map(|t| t.to_string());
-
-            let message_id = parsed.message_id().map(|s| s.to_string());
-            let in_reply_to = parsed.in_reply_to().as_text().map(|s| s.to_string());
-            let references: Vec<String> = parsed.references().as_text_list()
-                .map(|list| list.iter().map(|s| s.to_string()).collect())
-                .unwrap_or_default();
-            let raw_source = Some(String::from_utf8_lossy(raw).to_string());
-
-            let attachments = parsed
-                .attachments()
-                .map(|part| {
-                    let filename = part
-                        .attachment_name()
-                        .unwrap_or("attachment")
-                        .to_string();
-                    let content_type = part
-                        .content_type()
-                        .map(|ct: &mail_parser::ContentType| {
-                            format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream"))
-                        })
-                        .unwrap_or_else(|| "application/octet-stream".to_string());
-                    let data = part.contents().to_vec();
-                    let size = data.len();
-                    Attachment { filename, content_type, size, data }
-                })
-                .collect();
-
-            result.push(MailMessage {
-                uid: msg.uid.unwrap_or(0),
-                subject,
-                from,
-                to,
-                cc,
-                date,
-                is_read,
-                is_flagged,
-                body_text,
-                body_html,
-                attachments,
-                message_id,
-                in_reply_to,
-                references,
-                raw_source,
-            });
-        }
+        let mut result: Vec<MailMessage> = messages
+            .iter()
+            .filter_map(|msg| parse_fetched_message(msg, &parser))
+            .collect();
 
         result.reverse();
         Ok((result, total))
@@ -452,114 +406,10 @@ impl ImapClient {
             .await;
 
         let parser = mail_parser::MessageParser::default();
-        let mut result = Vec::new();
-        for msg in &messages {
-            let flags: Vec<_> = msg.flags().collect();
-            let is_read = flags.iter().any(|f| matches!(f, async_imap::types::Flag::Seen));
-            let is_flagged = flags
-                .iter()
-                .any(|f| matches!(f, async_imap::types::Flag::Flagged));
-
-            let raw = match msg.body() {
-                Some(b) => b,
-                None => continue,
-            };
-            let parsed = match parser.parse(raw) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let subject = parsed.subject().unwrap_or("(no subject)").to_string();
-
-            let from = parsed
-                .from()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let to = parsed
-                .to()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let cc = parsed
-                .cc()
-                .map(|a| {
-                    a.iter()
-                        .map(|a| Address {
-                            name: a.name.as_ref().map(|n| n.to_string()),
-                            email: a.address.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let date = parsed.date().and_then(|d| {
-                DateTime::parse_from_rfc3339(&d.to_rfc3339())
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
-            });
-
-            let body_text = parsed.body_text(0).map(|t| t.to_string());
-            let body_html = parsed.body_html(0).map(|t| t.to_string());
-
-            let message_id = parsed.message_id().map(|s| s.to_string());
-            let in_reply_to = parsed.in_reply_to().as_text().map(|s| s.to_string());
-            let references: Vec<String> = parsed.references().as_text_list()
-                .map(|list| list.iter().map(|s| s.to_string()).collect())
-                .unwrap_or_default();
-            let raw_source = Some(String::from_utf8_lossy(raw).to_string());
-
-            let attachments = parsed
-                .attachments()
-                .map(|part| {
-                    let filename = part
-                        .attachment_name()
-                        .unwrap_or("attachment")
-                        .to_string();
-                    let content_type = part
-                        .content_type()
-                        .map(|ct: &mail_parser::ContentType| {
-                            format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream"))
-                        })
-                        .unwrap_or_else(|| "application/octet-stream".to_string());
-                    let data = part.contents().to_vec();
-                    let size = data.len();
-                    Attachment { filename, content_type, size, data }
-                })
-                .collect();
-
-            result.push(MailMessage {
-                uid: msg.uid.unwrap_or(0),
-                subject,
-                from,
-                to,
-                cc,
-                date,
-                is_read,
-                is_flagged,
-                body_text,
-                body_html,
-                attachments,
-                message_id,
-                in_reply_to,
-                references,
-                raw_source,
-            });
-        }
+        let mut result: Vec<MailMessage> = messages
+            .iter()
+            .filter_map(|msg| parse_fetched_message(msg, &parser))
+            .collect();
 
         result.reverse();
         Ok(result)

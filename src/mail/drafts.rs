@@ -27,12 +27,6 @@ pub fn save_draft(draft: &Draft) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load_draft(id: &str) -> Result<Draft, String> {
-    let path = drafts_dir().join(format!("{id}.json"));
-    let data = fs::read_to_string(&path).map_err(|e| format!("Read failed: {e}"))?;
-    serde_json::from_str(&data).map_err(|e| format!("Deserialize failed: {e}"))
-}
-
 pub fn list_drafts() -> Vec<Draft> {
     let dir = drafts_dir();
     let Ok(entries) = fs::read_dir(&dir) else {
@@ -64,6 +58,12 @@ pub fn delete_draft(id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_draft(id: &str) -> Result<Draft, String> {
+        let path = super::drafts_dir().join(format!("{id}.json"));
+        let data = std::fs::read_to_string(&path).map_err(|e| format!("Read failed: {e}"))?;
+        serde_json::from_str(&data).map_err(|e| format!("Deserialize failed: {e}"))
+    }
 
     #[test]
     fn save_load_delete_roundtrip() {

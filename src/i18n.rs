@@ -211,6 +211,14 @@ pub fn t(key: &str) -> &'static str {
         ("toast.deleted_count", Locale::En) => "Deleted",
         ("toast.deleted_count", Locale::Ru) => "Удалено",
 
+        // Dialogs
+        ("dialog.confirm_delete", Locale::En) => "Delete this message?",
+        ("dialog.confirm_delete", Locale::Ru) => "Удалить это сообщение?",
+        ("dialog.cancel", Locale::En) => "Cancel",
+        ("dialog.cancel", Locale::Ru) => "Отмена",
+        ("dialog.delete", Locale::En) => "Delete",
+        ("dialog.delete", Locale::Ru) => "Удалить",
+
         // Offline
         ("status.offline", Locale::En) => "Offline (cached)",
         ("status.offline", Locale::Ru) => "Оффлайн (кэш)",

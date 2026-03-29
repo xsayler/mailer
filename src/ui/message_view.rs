@@ -295,6 +295,11 @@ impl MessageView {
         self.stack.set_visible_child_name("message");
     }
 
+    pub fn print(&self) {
+        let print_op = webkit6::PrintOperation::new(&self.web_view);
+        print_op.run_dialog(self.web_view.root().and_then(|r| r.downcast::<gtk::Window>().ok()).as_ref());
+    }
+
     pub fn clear(&self) {
         self.stack.set_visible_child_name("empty");
     }

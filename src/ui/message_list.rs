@@ -394,6 +394,13 @@ impl MessageList {
             top_row.append(&star);
         }
 
+        if msg.has_attachments() {
+            let clip = gtk::Image::from_icon_name("mail-attachment-symbolic");
+            clip.set_pixel_size(14);
+            clip.add_css_class("dim-label");
+            top_row.append(&clip);
+        }
+
         let date_label = gtk::Label::new(Some(&msg.date_display()));
         date_label.add_css_class("dim-label");
         date_label.add_css_class("caption");

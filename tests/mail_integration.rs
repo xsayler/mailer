@@ -11,7 +11,6 @@ use std::fmt;
 pub enum MailError {
     Network(String),
     Auth(String),
-    Parse(String),
     Imap(String),
     Smtp(String),
 }
@@ -21,7 +20,6 @@ impl fmt::Display for MailError {
         match self {
             MailError::Network(msg) => write!(f, "{msg}"),
             MailError::Auth(msg) => write!(f, "{msg}"),
-            MailError::Parse(msg) => write!(f, "{msg}"),
             MailError::Imap(msg) => write!(f, "{msg}"),
             MailError::Smtp(msg) => write!(f, "{msg}"),
         }

@@ -68,7 +68,17 @@ impl MailMessage {
 
     pub fn date_display(&self) -> String {
         self.date
-            .map(|d| d.with_timezone(&chrono::Local).format("%d %b %Y %H:%M").to_string())
+            .map(|d| {
+                let local = d.with_timezone(&chrono::Local);
+                let now = chrono::Local::now();
+                if local.date_naive() == now.date_naive() {
+                    local.format("%H:%M").to_string()
+                } else if local.date_naive() == (now - chrono::Duration::days(1)).date_naive() {
+                    local.format("%H:%M").to_string() + " ▪ " + if crate::i18n::locale() == crate::i18n::Locale::Ru { "вчера" } else { "yesterday" }
+                } else {
+                    local.format("%d %b %Y").to_string()
+                }
+            })
             .unwrap_or_default()
     }
 
@@ -147,12 +157,11 @@ mod tests {
     #[test]
     fn message_date_display_some() {
         let msg = MailMessage {
-            date: Some(Utc.with_ymd_and_hms(2025, 3, 15, 10, 30, 0).unwrap()),
+            date: Some(Utc.with_ymd_and_hms(2024, 1, 15, 10, 30, 0).unwrap()),
             ..Default::default()
         };
         let display = msg.date_display();
-        assert!(display.contains("2025"));
-        assert!(display.contains("10:30"));
+        assert!(display.contains("2024"));
     }
 
     #[test]
@@ -223,6 +232,8 @@ mod imp {
         #[property(get, set)]
         pub is_flagged: RefCell<bool>,
         #[property(get, set)]
+        pub has_attachments: RefCell<bool>,
+        #[property(get, set)]
         pub preview: RefCell<String>,
     }
 
@@ -250,6 +261,7 @@ impl MailMessageObject {
             .property("date-display", msg.date_display())
             .property("is-read", msg.is_read)
             .property("is-flagged", msg.is_flagged)
+            .property("has-attachments", !msg.attachments.is_empty())
             .property("preview", msg.preview_text())
             .build()
     }

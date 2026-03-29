@@ -839,13 +839,14 @@ impl MailerWindow {
             });
         }
 
-        // Delete button
+        // Delete button (with confirmation)
         {
             let msg_list4 = message_list.clone();
             let imap5 = imap_client.clone();
             let state6 = state.clone();
             let toast5 = toast_overlay.clone();
             let status5 = status_label.clone();
+            let win_del = window.clone();
 
             delete_btn.connect_clicked(move |_| {
                 let Some(row) = msg_list4.list_box.selected_row() else {
@@ -866,28 +867,50 @@ impl MailerWindow {
                     .clone()
                     .unwrap_or_default();
 
-                status5.set_text(t("status.deleting"));
+                let dialog = adw::MessageDialog::new(
+                    Some(&win_del),
+                    Some(t("dialog.confirm_delete")),
+                    None,
+                );
+                dialog.add_responses(&[
+                    ("cancel", t("dialog.cancel")),
+                    ("delete", t("dialog.delete")),
+                ]);
+                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+                dialog.set_default_response(Some("cancel"));
+
                 let msg_list = msg_list4.clone();
                 let state7 = state6.clone();
                 let toast = toast5.clone();
                 let status = status5.clone();
 
-                runtime::spawn_on_main(
-                    async move { client.delete_message(&folder, uid).await },
-                    move |result| match result {
-                        Ok(()) => {
-                            state7.borrow_mut().remove_message(uid);
-                            msg_list.remove_message_by_uid(uid);
-                            toast.add_toast(adw::Toast::new(t("toast.deleted")));
-                            let count = msg_list.message_count();
-                            status.set_text(&tf("status.message_count", &[&count.to_string()]));
-                        }
-                        Err(e) => {
-                            toast.add_toast(adw::Toast::new(&tf("error.delete_failed", &[&e.to_string()])));
-                            status.set_text(t("status.connected"));
-                        }
-                    },
-                );
+                dialog.connect_response(None, move |_, response| {
+                    if response != "delete" { return; }
+                    status.set_text(t("status.deleting"));
+                    let msg_list = msg_list.clone();
+                    let state7 = state7.clone();
+                    let toast = toast.clone();
+                    let status = status.clone();
+                    let client = client.clone();
+                    let folder = folder.clone();
+                    runtime::spawn_on_main(
+                        async move { client.delete_message(&folder, uid).await },
+                        move |result| match result {
+                            Ok(()) => {
+                                state7.borrow_mut().remove_message(uid);
+                                msg_list.remove_message_by_uid(uid);
+                                toast.add_toast(adw::Toast::new(t("toast.deleted")));
+                                let count = msg_list.message_count();
+                                status.set_text(&tf("status.message_count", &[&count.to_string()]));
+                            }
+                            Err(e) => {
+                                toast.add_toast(adw::Toast::new(&tf("error.delete_failed", &[&e.to_string()])));
+                                status.set_text(t("status.connected"));
+                            }
+                        },
+                    );
+                });
+                dialog.present();
             });
         }
 
@@ -1095,6 +1118,7 @@ impl MailerWindow {
         app2.set_accels_for_action("win.delete", &["Delete"]);
         app2.set_accels_for_action("win.search-focus", &["<Ctrl>f"]);
         app2.set_accels_for_action("win.refresh", &["F5"]);
+        app2.set_accels_for_action("win.print", &["<Ctrl>p"]);
 
         // Register actions
         let action_group = gtk::gio::SimpleActionGroup::new();
@@ -1125,6 +1149,13 @@ impl MailerWindow {
         let refresh_btn2 = refresh_btn.clone();
         refresh_action.connect_activate(move |_, _| refresh_btn2.emit_clicked());
         action_group.add_action(&refresh_action);
+
+        let print_action = gtk::gio::SimpleAction::new("print", None);
+        let mv_print = message_view.clone();
+        print_action.connect_activate(move |_, _| {
+            mv_print.print();
+        });
+        action_group.add_action(&print_action);
 
         window.insert_action_group("win", Some(&action_group));
 
