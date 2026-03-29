@@ -1,6 +1,7 @@
 pub mod contacts;
 pub mod disk_cache;
 pub mod drafts;
+pub mod filters;
 pub mod error;
 pub mod imap_client;
 pub mod models;

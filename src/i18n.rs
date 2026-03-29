@@ -89,6 +89,34 @@ pub fn t(key: &str) -> &'static str {
         ("message.unsubscribe", Locale::En) => "Unsubscribe",
         ("message.unsubscribe", Locale::Ru) => "Отписаться",
 
+        // Filters
+        ("filter.title", Locale::En) => "Message Filters",
+        ("filter.title", Locale::Ru) => "Фильтры сообщений",
+        ("filter.add", Locale::En) => "Add Filter",
+        ("filter.add", Locale::Ru) => "Добавить фильтр",
+        ("filter.name", Locale::En) => "Filter name",
+        ("filter.name", Locale::Ru) => "Название фильтра",
+        ("filter.field", Locale::En) => "Field",
+        ("filter.field", Locale::Ru) => "Поле",
+        ("filter.contains", Locale::En) => "Contains",
+        ("filter.contains", Locale::Ru) => "Содержит",
+        ("filter.action", Locale::En) => "Action",
+        ("filter.action", Locale::Ru) => "Действие",
+        ("filter.move_to", Locale::En) => "Move to folder",
+        ("filter.move_to", Locale::Ru) => "Переместить в папку",
+        ("filter.mark_read", Locale::En) => "Mark as read",
+        ("filter.mark_read", Locale::Ru) => "Отметить как прочитанное",
+        ("filter.star", Locale::En) => "Star",
+        ("filter.star", Locale::Ru) => "Отметить звёздочкой",
+        ("filter.delete", Locale::En) => "Delete",
+        ("filter.delete", Locale::Ru) => "Удалить",
+        ("filter.empty", Locale::En) => "No filters configured",
+        ("filter.empty", Locale::Ru) => "Фильтры не настроены",
+
+        // Thread
+        ("message.thread_count", Locale::En) => "messages in thread",
+        ("message.thread_count", Locale::Ru) => "сообщений в цепочке",
+
         // Compose window
         ("compose.title", Locale::En) => "New Message",
         ("compose.title", Locale::Ru) => "Новое сообщение",

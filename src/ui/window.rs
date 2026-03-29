@@ -79,6 +79,16 @@ impl MailerWindow {
         add_account_btn.set_tooltip_text(Some(t("account.add_title")));
         header.pack_end(&add_account_btn);
 
+        let filter_btn = gtk::Button::from_icon_name("funnel-symbolic");
+        filter_btn.set_tooltip_text(Some(t("filter.title")));
+        header.pack_end(&filter_btn);
+        {
+            let win_filter = window.clone();
+            filter_btn.connect_clicked(move |_| {
+                show_filter_dialog(&win_filter);
+            });
+        }
+
         let about_btn = gtk::Button::from_icon_name("help-about-symbolic");
         header.pack_end(&about_btn);
         {
@@ -230,6 +240,47 @@ impl MailerWindow {
                                 msg_list.set_messages(&messages);
                                 msg_list.set_has_more(state3.borrow().has_more());
                                 status3.set_text(&tf("status.message_count", &[&count.to_string(), &count.to_string()]));
+
+                                // Apply filters on new unread messages
+                                let filters = crate::mail::filters::load_filters();
+                                if !filters.is_empty() {
+                                    for msg in &messages {
+                                        if msg.is_read { continue; }
+                                        if let Some(action) = crate::mail::filters::match_filter(msg, &filters) {
+                                            let uid = msg.uid;
+                                            let client_f = client2.clone();
+                                            let folder_f = folder.clone();
+                                            let ml_f = msg_list.clone();
+                                            let st_f = state3.clone();
+                                            match action {
+                                                crate::mail::filters::FilterAction::MoveTo(dest) => {
+                                                    runtime::spawn_on_main(
+                                                        async move { client_f.move_message(&folder_f, uid, &dest).await },
+                                                        move |result| { if result.is_ok() { st_f.borrow_mut().remove_message(uid); ml_f.remove_message_by_uid(uid); } },
+                                                    );
+                                                }
+                                                crate::mail::filters::FilterAction::MarkRead => {
+                                                    runtime::spawn_on_main(
+                                                        async move { client_f.mark_read(&folder_f, uid, true).await },
+                                                        move |result| { if result.is_ok() { st_f.borrow_mut().update_read_status(uid, true); ml_f.update_read_status(uid, true); } },
+                                                    );
+                                                }
+                                                crate::mail::filters::FilterAction::Star => {
+                                                    runtime::spawn_on_main(
+                                                        async move { client_f.set_flagged(&folder_f, uid, true).await },
+                                                        move |result| { if result.is_ok() { st_f.borrow_mut().update_flagged_status(uid, true); ml_f.update_flagged_status(uid, true); } },
+                                                    );
+                                                }
+                                                crate::mail::filters::FilterAction::Delete => {
+                                                    runtime::spawn_on_main(
+                                                        async move { client_f.delete_message(&folder_f, uid).await },
+                                                        move |result| { if result.is_ok() { st_f.borrow_mut().remove_message(uid); ml_f.remove_message_by_uid(uid); } },
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Start IDLE on this folder
                                 let status_idle = status3.clone();
@@ -492,7 +543,18 @@ impl MailerWindow {
                 let index = row.index() as usize;
 
                 if let Some(msg) = msg_list2.get_sorted_message(index) {
-                    msg_view2.show_message(&msg);
+                    // Find thread messages by normalized subject
+                    let thread_subj = msg.thread_subject();
+                    let all_msgs = state_auto.borrow().messages.clone();
+                    let thread: Vec<_> = all_msgs.iter()
+                        .filter(|m| m.thread_subject() == thread_subj)
+                        .cloned()
+                        .collect();
+                    if thread.len() > 1 {
+                        msg_view2.show_thread(&thread);
+                    } else {
+                        msg_view2.show_message(&msg);
+                    }
 
                     if !msg.is_read {
                         let uid = msg.uid;
@@ -1839,4 +1901,160 @@ fn update_window_title(window: &adw::ApplicationWindow, total_unread: u32) {
     } else {
         window.set_title(Some(t("app.title")));
     }
+}
+
+fn show_filter_dialog(parent: &adw::ApplicationWindow) {
+    use crate::mail::filters::{Filter, FilterField, FilterAction, load_filters, save_filters};
+
+    let window = adw::Window::builder()
+        .title(t("filter.title"))
+        .default_width(500)
+        .default_height(500)
+        .transient_for(parent)
+        .modal(true)
+        .build();
+
+    let main_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let header = adw::HeaderBar::new();
+    let add_btn = gtk::Button::from_icon_name("list-add-symbolic");
+    add_btn.set_tooltip_text(Some(t("filter.add")));
+    header.pack_start(&add_btn);
+    main_box.append(&header);
+
+    let list_box = gtk::ListBox::new();
+    list_box.add_css_class("boxed-list");
+    list_box.set_selection_mode(gtk::SelectionMode::None);
+
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_child(Some(&list_box));
+    scrolled.set_vexpand(true);
+    main_box.append(&scrolled);
+
+    window.set_content(Some(&main_box));
+
+    let filters = Rc::new(RefCell::new(load_filters()));
+
+    let rebuild_list = {
+        let lb = list_box.clone();
+        let filters = filters.clone();
+        Rc::new(move || {
+            while let Some(child) = lb.first_child() {
+                lb.remove(&child);
+            }
+            let f = filters.borrow();
+            if f.is_empty() {
+                let lbl = gtk::Label::new(Some(t("filter.empty")));
+                lbl.add_css_class("dim-label");
+                lbl.set_margin_top(16);
+                lbl.set_margin_bottom(16);
+                lb.append(&lbl);
+                return;
+            }
+            for (i, filter) in f.iter().enumerate() {
+                let row = adw::ActionRow::builder()
+                    .title(&filter.name)
+                    .subtitle(&format!("{}: \"{}\"", match filter.field {
+                        FilterField::From => "From",
+                        FilterField::To => "To",
+                        FilterField::Subject => "Subject",
+                    }, filter.contains))
+                    .build();
+                let del_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+                del_btn.add_css_class("flat");
+                del_btn.set_valign(gtk::Align::Center);
+                let filters2 = filters.clone();
+                let lb2 = lb.clone();
+                del_btn.connect_clicked(move |_| {
+                    filters2.borrow_mut().remove(i);
+                    save_filters(&filters2.borrow());
+                    // Rebuild (simplified — just remove this row)
+                    while let Some(child) = lb2.first_child() {
+                        lb2.remove(&child);
+                    }
+                });
+                row.add_suffix(&del_btn);
+                lb.append(&row);
+            }
+        })
+    };
+    rebuild_list();
+
+    let win2 = window.clone();
+    let filters2 = filters.clone();
+    let rebuild = rebuild_list.clone();
+    add_btn.connect_clicked(move |_| {
+        let dialog = adw::Window::builder()
+            .title(t("filter.add"))
+            .default_width(400)
+            .default_height(350)
+            .transient_for(&win2)
+            .modal(true)
+            .build();
+        let dbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let dheader = adw::HeaderBar::new();
+        let ok_btn = gtk::Button::with_label(t("account.save"));
+        ok_btn.add_css_class("suggested-action");
+        dheader.pack_end(&ok_btn);
+        dbox.append(&dheader);
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        content.set_margin_start(16);
+        content.set_margin_end(16);
+        content.set_margin_top(16);
+        content.set_margin_bottom(16);
+
+        let name_entry = adw::EntryRow::new();
+        name_entry.set_title(t("filter.name"));
+        content.append(&name_entry);
+
+        let field_dropdown = gtk::DropDown::from_strings(&["From", "To", "Subject"]);
+        content.append(&field_dropdown);
+
+        let contains_entry = adw::EntryRow::new();
+        contains_entry.set_title(t("filter.contains"));
+        content.append(&contains_entry);
+
+        let action_dropdown = gtk::DropDown::from_strings(&[
+            t("filter.move_to"), t("filter.mark_read"), t("filter.star"), t("filter.delete")
+        ]);
+        content.append(&action_dropdown);
+
+        let dest_entry = adw::EntryRow::new();
+        dest_entry.set_title(t("filter.move_to"));
+        content.append(&dest_entry);
+
+        dbox.append(&content);
+        dialog.set_content(Some(&dbox));
+
+        let d = dialog.clone();
+        let f = filters2.clone();
+        let rb = rebuild.clone();
+        ok_btn.connect_clicked(move |_| {
+            let name = name_entry.text().to_string();
+            let contains = contains_entry.text().to_string();
+            if name.is_empty() || contains.is_empty() { return; }
+
+            let field = match field_dropdown.selected() {
+                0 => FilterField::From,
+                1 => FilterField::To,
+                _ => FilterField::Subject,
+            };
+            let action = match action_dropdown.selected() {
+                0 => FilterAction::MoveTo(dest_entry.text().to_string()),
+                1 => FilterAction::MarkRead,
+                2 => FilterAction::Star,
+                _ => FilterAction::Delete,
+            };
+
+            f.borrow_mut().push(Filter {
+                name, field, contains, action, enabled: true,
+            });
+            save_filters(&f.borrow());
+            rb();
+            d.close();
+        });
+        dialog.present();
+    });
+
+    window.present();
 }

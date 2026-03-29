@@ -97,7 +97,7 @@ impl MessageView {
         settings.set_enable_javascript(false);
         settings.set_allow_modal_dialogs(false);
 
-        web_view.set_background_color(&gtk::gdk::RGBA::new(0.0, 0.0, 0.0, 0.0));
+        // Let the HTML CSS handle colors (light/dark via prefers-color-scheme)
 
         // Load images button
         let load_images_btn = gtk::Button::with_label(t("message.load_images"));
@@ -378,6 +378,51 @@ impl MessageView {
         self.stack.set_visible_child_name("message");
     }
 
+    /// Show a thread of related messages in a single view.
+    pub fn show_thread(&self, messages: &[MailMessage]) {
+        if messages.is_empty() { return; }
+        if messages.len() == 1 {
+            self.show_message(&messages[0]);
+            return;
+        }
+
+        let first = &messages[0];
+        self.subject_label.set_text(&first.subject);
+        self.from_label.set_text(&tf("message.from", &[&first.from_display()]));
+        self.to_label.set_text("");
+        self.cc_label.set_visible(false);
+        self.date_label.set_text(&format!("{} messages", messages.len()));
+        while let Some(child) = self.attachment_box.first_child() {
+            self.attachment_box.remove(&child);
+        }
+        self.attachment_box.set_visible(false);
+        self.load_images_btn.set_visible(false);
+
+        let mut html_parts = Vec::new();
+        for msg in messages {
+            let from = msg.from_display();
+            let date = msg.date_display();
+            let body = if let Some(ref h) = msg.body_html {
+                sanitize_html(h)
+            } else if let Some(ref t) = msg.body_text {
+                t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\n', "<br>")
+            } else {
+                String::new()
+            };
+            html_parts.push(format!(
+                "<div style=\"margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #444\">\
+                <div style=\"font-weight:bold;margin-bottom:4px\">{from}</div>\
+                <div style=\"font-size:12px;color:#888;margin-bottom:8px\">{date}</div>\
+                <div>{body}</div></div>"
+            ));
+        }
+        let combined = html_parts.join("\n");
+        let full_html = wrap_html(&combined);
+        *self.current_html.borrow_mut() = Some(full_html.clone());
+        self.web_view.load_html(&full_html, None);
+        self.stack.set_visible_child_name("message");
+    }
+
     pub fn set_on_quick_reply(&self, cb: impl Fn(String) + 'static) {
         *self.on_quick_reply.borrow_mut() = Some(Box::new(cb));
     }
@@ -401,44 +446,57 @@ body {{
     font-size: 14px;
     padding: 12px 16px;
     margin: 0;
-    color: #e0e0e0;
-    background: transparent;
+    color: #1a1a1a;
+    background: #ffffff;
     word-wrap: break-word;
     overflow-wrap: break-word;
 }}
-@media (prefers-color-scheme: light) {{
-    body {{ color: #1a1a1a; }}
-}}
 img {{ max-width: 100%; height: auto; }}
-a {{ color: #5294e2; cursor: pointer; }}
+a {{ color: #1a6fb5; cursor: pointer; }}
 blockquote {{
-    border-left: 3px solid #555;
+    border-left: 3px solid #ccc;
     margin: 8px 0;
     padding: 4px 12px;
-    color: #aaa;
+    color: #666;
 }}
 </style></head><body>{body}</body></html>"#
     )
 }
 
 fn sanitize_html(html: &str) -> String {
-    ammonia::Builder::default()
-        .add_tags(&[
-            "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "div", "span",
-            "b", "i", "u", "strong", "em", "a", "ul", "ol", "li", "blockquote",
-            "pre", "code", "table", "thead", "tbody", "tr", "td", "th", "img",
-            "sub", "sup", "dl", "dt", "dd", "center", "font", "small", "big",
-        ])
-        .add_tag_attributes("a", &["href"])
-        .add_tag_attributes("img", &["src", "alt", "width", "height"])
-        .add_tag_attributes("td", &["colspan", "rowspan", "align", "valign"])
-        .add_tag_attributes("th", &["colspan", "rowspan", "align", "valign"])
-        .add_tag_attributes("font", &["color", "size", "face"])
-        .add_tag_attributes("div", &["align"])
-        .add_tag_attributes("p", &["align"])
-        .url_schemes(["http", "https", "cid", "data"].iter().copied().collect())
-        .clean(html)
-        .to_string()
+    let all_tags = &[
+        "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "div", "span",
+        "b", "i", "u", "strong", "em", "a", "ul", "ol", "li", "blockquote",
+        "pre", "code", "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+        "img", "sub", "sup", "dl", "dt", "dd", "center", "font", "small", "big",
+        "caption", "colgroup", "col", "section", "article", "header", "footer",
+        "nav", "aside", "figure", "figcaption", "mark", "abbr", "details", "summary",
+    ];
+    let style_attr = &["style"];
+    let mut builder = ammonia::Builder::default();
+    builder
+        .add_tags(all_tags)
+        .add_tag_attributes("a", &["href", "target", "style"])
+        .add_tag_attributes("img", &["src", "alt", "width", "height", "style"])
+        .add_tag_attributes("td", &["colspan", "rowspan", "align", "valign", "width", "height", "bgcolor", "style"])
+        .add_tag_attributes("th", &["colspan", "rowspan", "align", "valign", "width", "height", "bgcolor", "style"])
+        .add_tag_attributes("table", &["width", "height", "cellpadding", "cellspacing", "border", "bgcolor", "align", "style"])
+        .add_tag_attributes("tr", &["bgcolor", "align", "valign", "style"])
+        .add_tag_attributes("font", &["color", "size", "face", "style"])
+        .add_tag_attributes("div", &["align", "style"])
+        .add_tag_attributes("span", &["style"])
+        .add_tag_attributes("p", &["align", "style"])
+        .add_tag_attributes("center", &["style"])
+        .add_tag_attributes("hr", &["style"])
+        .add_tag_attributes("body", &["style"])
+        .add_tag_attributes("h1", style_attr).add_tag_attributes("h2", style_attr)
+        .add_tag_attributes("h3", style_attr).add_tag_attributes("h4", style_attr)
+        .add_tag_attributes("b", style_attr).add_tag_attributes("i", style_attr)
+        .add_tag_attributes("strong", style_attr).add_tag_attributes("em", style_attr)
+        .add_tag_attributes("ul", style_attr).add_tag_attributes("ol", style_attr)
+        .add_tag_attributes("li", style_attr).add_tag_attributes("blockquote", style_attr)
+        .url_schemes(["http", "https", "cid", "data"].iter().copied().collect());
+    builder.clean(html).to_string()
 }
 
 fn plain_to_html(text: &str) -> String {
