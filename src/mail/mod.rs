@@ -1,3 +1,4 @@
+pub mod contacts;
 pub mod disk_cache;
 pub mod drafts;
 pub mod error;

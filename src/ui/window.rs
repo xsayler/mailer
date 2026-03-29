@@ -22,13 +22,17 @@ pub struct MailerWindow {
 
 impl MailerWindow {
     pub fn new(app: &adw::Application) -> Self {
+        let saved_state = AppConfig::load().window_state;
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title(t("app.title"))
-            .default_width(1200)
-            .default_height(700)
+            .default_width(saved_state.width)
+            .default_height(saved_state.height)
             .icon_name("com.sayler.mailer")
             .build();
+        if saved_state.maximized {
+            window.maximize();
+        }
 
         let state = Rc::new(RefCell::new(AppState::new()));
         let imap_client: Rc<RefCell<Option<Arc<ImapClient>>>> = Rc::new(RefCell::new(None));
@@ -74,6 +78,23 @@ impl MailerWindow {
         let add_account_btn = gtk::Button::from_icon_name("list-add-symbolic");
         add_account_btn.set_tooltip_text(Some(t("account.add_title")));
         header.pack_end(&add_account_btn);
+
+        let about_btn = gtk::Button::from_icon_name("help-about-symbolic");
+        header.pack_end(&about_btn);
+        {
+            let win_about = window.clone();
+            about_btn.connect_clicked(move |_| {
+                let dialog = adw::AboutWindow::builder()
+                    .application_name("Mailer")
+                    .application_icon("com.sayler.mailer")
+                    .version("0.1.0")
+                    .developer_name("sayler")
+                    .transient_for(&win_about)
+                    .modal(true)
+                    .build();
+                dialog.present();
+            });
+        }
 
         // Account switcher
         let account_model = gtk::StringList::new(&[]);
@@ -444,6 +465,9 @@ impl MailerWindow {
                     Some("ctx.toggle-star"),
                 );
 
+                menu.append(Some(t("menu.view_source")), Some("ctx.view-source"));
+                menu.append(Some(t("menu.save_eml")), Some("ctx.save-eml"));
+
                 // Move submenu
                 let move_menu = gtk::gio::Menu::new();
                 for folder in msg_list_ctx.get_folders() {
@@ -529,12 +553,13 @@ impl MailerWindow {
                     let win = win_ctx.clone();
                     let msg2 = msg.clone();
                     let imap_reply = imap_ctx.clone();
+                    let toast_reply = toast_ctx.clone();
                     reply_action.connect_activate(move |_, _| {
                         let config = AppConfig::load();
                         let Some(account) = config.first_account() else { return };
                         let reply_to = msg2.from.first().map(|a| a.email.clone()).unwrap_or_default();
                         let body = msg2.body_text.as_deref().unwrap_or("");
-                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body, imap_reply.borrow().clone());
+                        compose_window::show_reply_window(&win, account.clone(), &reply_to, &msg2.subject, body, imap_reply.borrow().clone(), toast_reply.clone());
                     });
                 }
                 action_group.add_action(&reply_action);
@@ -545,6 +570,7 @@ impl MailerWindow {
                     let win = win_ctx.clone();
                     let msg2 = msg.clone();
                     let imap_ra = imap_ctx.clone();
+                    let toast_ra = toast_ctx.clone();
                     reply_all_action.connect_activate(move |_, _| {
                         let config = AppConfig::load();
                         let Some(account) = config.first_account() else { return };
@@ -555,7 +581,7 @@ impl MailerWindow {
                             .collect();
                         let cc = cc_addrs.join(", ");
                         let body = msg2.body_text.as_deref().unwrap_or("");
-                        compose_window::show_reply_all_window(&win, account.clone(), &reply_to, &cc, &msg2.subject, body, imap_ra.borrow().clone());
+                        compose_window::show_reply_all_window(&win, account.clone(), &reply_to, &cc, &msg2.subject, body, imap_ra.borrow().clone(), toast_ra.clone());
                     });
                 }
                 action_group.add_action(&reply_all_action);
@@ -566,10 +592,11 @@ impl MailerWindow {
                     let win = win_ctx.clone();
                     let msg2 = msg.clone();
                     let imap_fwd = imap_ctx.clone();
+                    let toast = toast_ctx.clone();
                     forward_action.connect_activate(move |_, _| {
                         let config = AppConfig::load();
                         let Some(account) = config.first_account() else { return };
-                        compose_window::show_forward_window(&win, account.clone(), &msg2, imap_fwd.borrow().clone());
+                        compose_window::show_forward_window(&win, account.clone(), &msg2, imap_fwd.borrow().clone(), toast.clone());
                     });
                 }
                 action_group.add_action(&forward_action);
@@ -603,6 +630,63 @@ impl MailerWindow {
                     });
                 }
                 action_group.add_action(&star_action);
+
+                // View Source action
+                let source_action = gtk::gio::SimpleAction::new("view-source", None);
+                {
+                    let msg2 = msg.clone();
+                    let win = win_ctx.clone();
+                    source_action.connect_activate(move |_, _| {
+                        if let Some(ref src) = msg2.raw_source {
+                            let dialog = adw::Window::builder()
+                                .title(t("menu.view_source"))
+                                .default_width(700)
+                                .default_height(500)
+                                .transient_for(&win)
+                                .build();
+                            let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                            vbox.append(&adw::HeaderBar::new());
+                            let tv = gtk::TextView::new();
+                            tv.set_editable(false);
+                            tv.set_monospace(true);
+                            tv.buffer().set_text(src);
+                            let sw = gtk::ScrolledWindow::new();
+                            sw.set_child(Some(&tv));
+                            sw.set_vexpand(true);
+                            vbox.append(&sw);
+                            dialog.set_content(Some(&vbox));
+                            dialog.present();
+                        }
+                    });
+                }
+                action_group.add_action(&source_action);
+
+                // Save as .eml action
+                let eml_action = gtk::gio::SimpleAction::new("save-eml", None);
+                {
+                    let msg2 = msg.clone();
+                    let win = win_ctx.clone();
+                    eml_action.connect_activate(move |_, _| {
+                        if let Some(ref src) = msg2.raw_source {
+                            let dialog = gtk::FileDialog::builder()
+                                .initial_name(&format!("{}.eml", msg2.subject.chars().take(50).collect::<String>()))
+                                .build();
+                            let data = src.clone();
+                            dialog.save(
+                                Some(&win),
+                                gtk::gio::Cancellable::NONE,
+                                move |result| {
+                                    if let Ok(file) = result {
+                                        if let Some(path) = file.path() {
+                                            std::fs::write(path, &data).ok();
+                                        }
+                                    }
+                                },
+                            );
+                        }
+                    });
+                }
+                action_group.add_action(&eml_action);
 
                 // Move action
                 let move_action = gtk::gio::SimpleAction::new("move-to", Some(&String::static_variant_type()));
@@ -661,11 +745,12 @@ impl MailerWindow {
             let win2 = window.clone();
             let dd = account_dropdown.clone();
             let imap_compose = imap_client.clone();
+            let toast_compose = toast_overlay.clone();
             compose_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
                 let idx = dd.selected() as usize;
                 if let Some(account) = config.accounts.get(idx) {
-                    compose_window::show_compose_window(&win2, account.clone(), None, imap_compose.borrow().clone());
+                    compose_window::show_compose_window(&win2, account.clone(), None, imap_compose.borrow().clone(), toast_compose.clone());
                 }
             });
         }
@@ -675,6 +760,7 @@ impl MailerWindow {
             let win3 = window.clone();
             let msg_list3 = message_list.clone();
             let dd2 = account_dropdown.clone();
+            let toast_reply_btn = toast_overlay.clone();
             let imap_reply = imap_client.clone();
             reply_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
@@ -699,6 +785,7 @@ impl MailerWindow {
                             &msg.subject,
                             body,
                             imap_reply.borrow().clone(),
+                            toast_reply_btn.clone(),
                         );
                     }
                 }
@@ -711,6 +798,7 @@ impl MailerWindow {
             let msg_list_ra = message_list.clone();
             let dd_ra = account_dropdown.clone();
             let imap_ra = imap_client.clone();
+            let toast_ra = toast_overlay.clone();
             reply_all_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
                 let idx = dd_ra.selected() as usize;
@@ -725,7 +813,7 @@ impl MailerWindow {
                             .collect();
                         let cc = cc_addrs.join(", ");
                         let body = msg.body_text.as_deref().unwrap_or("");
-                        compose_window::show_reply_all_window(&win_ra, account.clone(), &reply_to, &cc, &msg.subject, body, imap_ra.borrow().clone());
+                        compose_window::show_reply_all_window(&win_ra, account.clone(), &reply_to, &cc, &msg.subject, body, imap_ra.borrow().clone(), toast_ra.clone());
                     }
                 }
             });
@@ -737,6 +825,7 @@ impl MailerWindow {
             let msg_list_fwd = message_list.clone();
             let dd_fwd = account_dropdown.clone();
             let imap_fwd = imap_client.clone();
+            let toast_fwd = toast_overlay.clone();
             forward_btn.connect_clicked(move |_| {
                 let config = AppConfig::load();
                 let idx = dd_fwd.selected() as usize;
@@ -744,7 +833,7 @@ impl MailerWindow {
                 if let Some(row) = msg_list_fwd.list_box.selected_row() {
                     let i = row.index() as usize;
                     if let Some(msg) = msg_list_fwd.get_sorted_message(i) {
-                        compose_window::show_forward_window(&win_fwd, account.clone(), &msg, imap_fwd.borrow().clone());
+                        compose_window::show_forward_window(&win_fwd, account.clone(), &msg, imap_fwd.borrow().clone(), toast_fwd.clone());
                     }
                 }
             });
@@ -1262,6 +1351,7 @@ impl MailerWindow {
             let dd_d = account_dropdown.clone();
             let popover_d = popover.clone();
             let imap_drafts = imap_client.clone();
+            let toast_drafts = toast_overlay.clone();
             popover.connect_show(move |pop| {
                 // Rebuild drafts list each time
                 let drafts_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -1291,13 +1381,14 @@ impl MailerWindow {
                         let pop2 = popover_d.clone();
                         let d = draft.clone();
                         let imap_d = imap_drafts.clone();
+                        let toast_d = toast_drafts.clone();
                         btn.connect_clicked(move |_| {
+                            pop2.popdown();
                             let config = AppConfig::load();
                             let idx = dd.selected() as usize;
                             if let Some(account) = config.accounts.get(idx) {
-                                compose_window::show_compose_window(&win, account.clone(), Some(d.clone()), imap_d.borrow().clone());
+                                compose_window::show_compose_window(&win, account.clone(), Some(d.clone()), imap_d.borrow().clone(), toast_d.clone());
                             }
-                            pop2.popdown();
                         });
                         row.append(&btn);
 
@@ -1321,6 +1412,18 @@ impl MailerWindow {
             drafts_btn.set_popover(Some(&popover));
             header.pack_start(&drafts_btn);
         }
+
+        // Save window state on close
+        window.connect_close_request(|win| {
+            let mut config = AppConfig::load();
+            config.window_state = crate::config::WindowState {
+                width: win.width(),
+                height: win.height(),
+                maximized: win.is_maximized(),
+            };
+            config.save();
+            glib::Propagation::Proceed
+        });
 
         // Auto-connect if account exists
         let config = AppConfig::load();
@@ -1487,7 +1590,12 @@ fn connect_account_inner(
                     );
                 }
                 Err(e) => {
-                    status_label.set_text(t("status.connection_failed"));
+                    // If cached data is available, show it with offline indicator
+                    if disk_cache::load_folders().is_some() {
+                        status_label.set_text(t("status.offline"));
+                    } else {
+                        status_label.set_text(t("status.connection_failed"));
+                    }
                     toast_overlay.add_toast(adw::Toast::new(&tf("error.generic", &[&e.to_string()])));
                 }
             }

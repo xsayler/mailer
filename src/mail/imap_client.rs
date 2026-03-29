@@ -251,6 +251,13 @@ impl ImapClient {
             let body_text = parsed.body_text(0).map(|t| t.to_string());
             let body_html = parsed.body_html(0).map(|t| t.to_string());
 
+            let message_id = parsed.message_id().map(|s| s.to_string());
+            let in_reply_to = parsed.in_reply_to().as_text().map(|s| s.to_string());
+            let references: Vec<String> = parsed.references().as_text_list()
+                .map(|list| list.iter().map(|s| s.to_string()).collect())
+                .unwrap_or_default();
+            let raw_source = Some(String::from_utf8_lossy(raw).to_string());
+
             let attachments = parsed
                 .attachments()
                 .map(|part| {
@@ -282,6 +289,10 @@ impl ImapClient {
                 body_text,
                 body_html,
                 attachments,
+                message_id,
+                in_reply_to,
+                references,
+                raw_source,
             });
         }
 
@@ -505,6 +516,13 @@ impl ImapClient {
             let body_text = parsed.body_text(0).map(|t| t.to_string());
             let body_html = parsed.body_html(0).map(|t| t.to_string());
 
+            let message_id = parsed.message_id().map(|s| s.to_string());
+            let in_reply_to = parsed.in_reply_to().as_text().map(|s| s.to_string());
+            let references: Vec<String> = parsed.references().as_text_list()
+                .map(|list| list.iter().map(|s| s.to_string()).collect())
+                .unwrap_or_default();
+            let raw_source = Some(String::from_utf8_lossy(raw).to_string());
+
             let attachments = parsed
                 .attachments()
                 .map(|part| {
@@ -536,6 +554,10 @@ impl ImapClient {
                 body_text,
                 body_html,
                 attachments,
+                message_id,
+                in_reply_to,
+                references,
+                raw_source,
             });
         }
 

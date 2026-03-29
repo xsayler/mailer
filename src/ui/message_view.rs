@@ -8,6 +8,7 @@ pub struct MessageView {
     pub widget: gtk::Box,
     from_label: gtk::Label,
     to_label: gtk::Label,
+    cc_label: gtk::Label,
     subject_label: gtk::Label,
     date_label: gtk::Label,
     web_view: webkit6::WebView,
@@ -57,6 +58,13 @@ impl MessageView {
         to_label.set_wrap(true);
         to_label.add_css_class("dim-label");
         header_box.append(&to_label);
+
+        let cc_label = gtk::Label::new(None);
+        cc_label.set_halign(gtk::Align::Start);
+        cc_label.set_wrap(true);
+        cc_label.add_css_class("dim-label");
+        cc_label.set_visible(false);
+        header_box.append(&cc_label);
 
         let date_label = gtk::Label::new(None);
         date_label.set_halign(gtk::Align::Start);
@@ -164,6 +172,7 @@ impl MessageView {
             widget: main_box,
             from_label,
             to_label,
+            cc_label,
             subject_label,
             date_label,
             web_view,
@@ -186,6 +195,14 @@ impl MessageView {
             .collect::<Vec<_>>()
             .join(", ");
         self.to_label.set_text(&tf("message.to", &[&to_str]));
+
+        if !msg.cc.is_empty() {
+            let cc_str: String = msg.cc.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ");
+            self.cc_label.set_text(&tf("message.cc", &[&cc_str]));
+            self.cc_label.set_visible(true);
+        } else {
+            self.cc_label.set_visible(false);
+        }
 
         self.date_label.set_text(&msg.date_display());
 

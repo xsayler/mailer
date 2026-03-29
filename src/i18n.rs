@@ -201,6 +201,20 @@ pub fn t(key: &str) -> &'static str {
         ("tooltip.forward", Locale::En) => "Forward",
         ("tooltip.forward", Locale::Ru) => "Переслать",
 
+        // View source / export
+        ("menu.view_source", Locale::En) => "View Source",
+        ("menu.view_source", Locale::Ru) => "Исходный код письма",
+        ("menu.save_eml", Locale::En) => "Save as .eml",
+        ("menu.save_eml", Locale::Ru) => "Сохранить как .eml",
+
+        // Bulk operations
+        ("toast.deleted_count", Locale::En) => "Deleted",
+        ("toast.deleted_count", Locale::Ru) => "Удалено",
+
+        // Offline
+        ("status.offline", Locale::En) => "Offline (cached)",
+        ("status.offline", Locale::Ru) => "Оффлайн (кэш)",
+
         // Compose extras
         ("compose.reply_all_title", Locale::En) => "Reply All",
         ("compose.reply_all_title", Locale::Ru) => "Ответ всем",
@@ -314,6 +328,8 @@ pub fn tf(key: &str, args: &[&str]) -> String {
         ("message.from", Locale::Ru) => "От: {}",
         ("message.to", Locale::En) => "To: {}",
         ("message.to", Locale::Ru) => "Кому: {}",
+        ("message.cc", Locale::En) => "Cc: {}",
+        ("message.cc", Locale::Ru) => "Копия: {}",
 
         ("compose.re_subject", Locale::En) => "Re: {}",
         ("compose.re_subject", Locale::Ru) => "Re: {}",

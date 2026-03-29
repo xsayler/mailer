@@ -51,6 +51,11 @@ pub struct MailMessage {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub attachments: Vec<Attachment>,
+    pub message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
+    #[serde(skip)]
+    pub raw_source: Option<String>,
 }
 
 impl MailMessage {
@@ -63,7 +68,7 @@ impl MailMessage {
 
     pub fn date_display(&self) -> String {
         self.date
-            .map(|d| d.format("%d %b %Y %H:%M").to_string())
+            .map(|d| d.with_timezone(&chrono::Local).format("%d %b %Y %H:%M").to_string())
             .unwrap_or_default()
     }
 

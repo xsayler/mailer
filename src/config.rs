@@ -18,8 +18,23 @@ pub struct AccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WindowState {
+    #[serde(default = "default_width")]
+    pub width: i32,
+    #[serde(default = "default_height")]
+    pub height: i32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+fn default_width() -> i32 { 1200 }
+fn default_height() -> i32 { 700 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub accounts: Vec<AccountConfig>,
+    #[serde(default)]
+    pub window_state: WindowState,
 }
 
 impl AppConfig {
@@ -91,6 +106,7 @@ mod tests {
     #[test]
     fn first_account_returns_first() {
         let config = AppConfig {
+            window_state: WindowState::default(),
             accounts: vec![
                 AccountConfig {
                     display_name: "Alice".to_string(),
@@ -127,6 +143,7 @@ mod tests {
         let path = dir.join("test_accounts.json");
 
         let config = AppConfig {
+            window_state: WindowState::default(),
             accounts: vec![AccountConfig {
                 display_name: "Test".to_string(),
                 email: "test@example.com".to_string(),
@@ -160,6 +177,7 @@ mod tests {
     #[test]
     fn password_skipped_in_serialization() {
         let config = AppConfig {
+            window_state: WindowState::default(),
             accounts: vec![AccountConfig {
                 display_name: "Test".to_string(),
                 email: "test@example.com".to_string(),
